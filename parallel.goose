@@ -103,8 +103,11 @@ fn save_path_of(rundir: const u8[:], w: i64, out: u8[>..]&) {
 // holds the seed and the clock, so two runs never share a directory.
 fn run_dir(scratch: const u8[:], seed: u64, out: u8[>..]&) {
     out.clear();
-    out.append(scratch);
-    out.append("/fuzz-child-");
+    if scratch.len > 0 {
+        out.append(scratch);
+        out.append("/");
+    }
+    out.append("fuzz-child-");
     var buf: u8[>..] = [];
     let t = clock_ns();
     for i in 0..8 {
