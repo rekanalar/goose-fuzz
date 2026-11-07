@@ -14,7 +14,7 @@ finding with its message and its source line, and the run goes on.
 Add this to the root file of the program that uses it:
 
 ```goose
-import fuzz from "rekanalar/goose-fuzz@v0.3.0";
+import fuzz from "rekanalar/goose-fuzz@v1.0.0";
 ```
 
 The child mode needs one more package in the same root file:
@@ -25,6 +25,15 @@ import process from "rekanalar/goose-process@v1.0.0";
 
 The CI runs the gate on Linux, macOS and Windows. It uses Goose v2026.3 and
 v2026.4 on each.
+
+## What changed in v1.0.0
+
+The tag `v1.0.0` marks parity. The package holds the feature set of its
+section in the parity plan. No code changed after `v0.3.0`.
+
+One gap stays open: coverage guidance. It needs `-fsanitize-coverage` and
+`#line` in the generated C. The compilers give neither. The package
+steers by seeds and a dictionary instead.
 
 ## What changed in v0.3.0
 
@@ -52,7 +61,7 @@ hands it to the package. Call `fuzz::run`.
 
 ```goose
 import std;
-import fuzz from "rekanalar/goose-fuzz@v0.3.0";
+import fuzz from "rekanalar/goose-fuzz@v1.0.0";
 
 fn parse(d: const u8[:]) { /* may abort */ }
 
