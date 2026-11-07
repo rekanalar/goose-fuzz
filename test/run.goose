@@ -316,14 +316,20 @@ fn test_crashers() {
     assert(fuzz::replay("nothing", root, rr3, targets::assert_target) == 0);
     clean_dir(sub);
     delete_dir(root);
-    // an unwritable root keeps the finding
+    // an unwritable root keeps the finding: a directory cannot sit under a file
+    var blocker: u8[>..] = [];
+    env("TMPDIR", blocker);
+    blocker.append("/fz-not-a-dir");
+    assert(write_file(blocker, "x"));
     var bad = fuzz::config();
     bad.seed = 1;
     bad.runs = 10000;
-    bad.crash_root.append("/proc/fz-no-such-root");
+    bad.crash_root.append(blocker);
+    bad.crash_root.append("/root");
     var rb = fuzz::Report { };
     assert(fuzz::run("assert", bad, rb, targets::assert_target) == 1);
     assert(!rb.findings[0].saved && rb.save_failed == 1);
+    delete_file(blocker);
 }
 
 fn test_shrink() {
