@@ -26,34 +26,6 @@ import process from "rekanalar/goose-process@v1.0.0";
 The CI runs the gate on Linux, macOS and Windows. It uses Goose v2026.3 and
 v2026.4 on each.
 
-## What changed in v1.0.0
-
-The tag `v1.0.0` marks parity. The package holds the feature set of its
-section in the parity plan. No code changed after `v0.3.0`.
-
-One gap stays open: coverage guidance. It needs `-fsanitize-coverage` and
-`#line` in the generated C. The compilers give neither. The package
-steers by seeds and a dictionary instead.
-
-## What changed in v0.3.0
-
-The package gains three abilities. A dictionary of tokens steers the
-mutator. A target can read typed values from a `Reader`. The child mode
-can run several workers at once.
-
-One behavior changed. v0.2.0 gave every batch of the child mode the same
-seed. Each batch then repeated the inputs of the first batch. v0.3.0
-gives every batch and every worker its own seed, derived from the seed of
-the run. A seed still repeats a whole run.
-
-The child also takes two new optional arguments after the name: the
-dictionary file path and the token rate. A parent that passes only the
-seven arguments of v0.2.0 keeps working. A parent that passes only the seven arguments of v0.2.0 keeps
-working.
-
-Nothing else changed its name, its type or its result. The release is the
-minor tag `v0.3.0`.
-
 ## Use
 
 Write a function that takes a byte slice. Write one `thread_fn` line that
@@ -297,6 +269,10 @@ compiler reports this error. Pass such data in the input instead.
 
 All abort messages of `call_law` share one site, because the abort happens
 inside the package. Run one law for each `run`.
+
+The child takes two optional arguments after the name: the dictionary file
+path and the token rate. A parent that passes only seven arguments keeps
+working with no dictionary.
 
 The fuzzer has no coverage guidance. It does not learn which inputs reach new
 code. It mutates by bit flip, byte insert, byte delete and splice of two
