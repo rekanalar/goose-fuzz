@@ -62,3 +62,52 @@ fn mutate_next(r: rng&, pool: const u8[:], ends: const i64[:], max_len: i64, out
     }
     return kind;
 }
+
+// The default of Config.token_rate, and of the child that gets no rate.
+const DEFAULT_TOKEN_RATE = 25;
+
+// Mutate like mutate_next, and use a token at the rate in percent. With
+// an empty dictionary it calls mutate_next, so the rng draw order and
+// the inputs stay byte-identical. With tokens it draws the rate roll,
+// the token, the mode and the position after the four kinds. Returns
+// the kind: 0 to 3 as mutate_next, 4 token insert, 5 token overwrite.
+fn mutate_next_dict(r: rng&, pool: const u8[:], ends: const i64[:], max_len: i64,
+                    dpool: const u8[:], dends: const i64[:], rate: i64, out: u8[>..]&) -> i64 {
+    if dends.len == 0 {
+        return mutate_next(r, pool, ends, max_len, out);
+    }
+    let kind = mutate_next(r, pool, ends, max_len, out);
+    if rate <= 0 || r.rand_int(100) >= rate {
+        return kind;
+    }
+    // The token is cut to max_len, so no input passes it.
+    let tok = pick_seed(r, dpool, dends, max_len);
+    if tok.len == 0 {
+        return kind;
+    }
+    let mode = r.rand_int(2);
+    if mode == 0 {
+        // Insert the token at a position.
+        let pos = r.rand_int(out.len + 1);
+        var tmp: u8[>..] = [];
+        tmp.append(out[0..pos]);
+        tmp.append(tok);
+        tmp.append(out[pos..out.len]);
+        if tmp.len > max_len {
+            tmp.resize(max_len);
+        }
+        out.clear();
+        out.append(tmp);
+        return 4;
+    }
+    // Write the token over input bytes.
+    if out.len == 0 {
+        return kind;
+    }
+    let pos = r.rand_int(out.len);
+    let n = min(tok.len, out.len - pos);
+    for i in 0..n {
+        out[pos + i] = tok[i];
+    }
+    return 5;
+}

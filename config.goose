@@ -19,6 +19,14 @@ struct Config {
     // The program name of the child binary. Empty means the child mode
     // is refused.
     child: u8[..255] = [],
+    // 0 picks one worker for each core, capped at 8. The valid range is
+    // 1 to 15. The table of the process package holds 16.
+    workers: i64 = 0,
+    // The percent of mutations that use a token, from 0 to 100.
+    token_rate: i64 = 25,
+    // The dictionary text, in the libFuzzer format. Empty means no
+    // dictionary. It holds at most 4096 bytes.
+    dict: u8[..4096] = [],
 }
 
 fn config() -> Config {

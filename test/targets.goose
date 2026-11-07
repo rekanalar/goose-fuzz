@@ -69,6 +69,27 @@ fn hang_fn(d: const u8[:]) {
     }
 }
 
+fn goose_fn(d: const u8[:]) {
+    if d.len >= 5 && d[0..5] == "GOOSE" {
+        assert(false);
+    }
+}
+
+fn typed_fn(r: fuzz::Reader&) {
+    let n = fuzz::read_i64(r, 1000, 1010);
+    let flag = fuzz::read_bool(r);
+    let s = fuzz::read_string(r, 8);
+    let xs = fuzz::read_i64_list(r, 4);
+    let _ = s.len + xs.len;
+    if n > 1005 && flag {
+        assert(false);
+    }
+}
+
+fn slow_fn(d: const u8[:]) {
+    sleep_ms(1);
+}
+
 thread_fn always_target() { fuzz::call(always_fn); }
 thread_fn exit_target() { fuzz::call(exit_fn); }
 thread_fn hang_target() { fuzz::call(hang_fn); }
@@ -79,6 +100,9 @@ thread_fn div_target() { fuzz::call(div_fn); }
 thread_fn overflow_target() { fuzz::call(overflow_fn); }
 thread_fn prefix_target() { fuzz::call(prefix_fn); }
 thread_fn two_target() { fuzz::call(two_fn); }
+thread_fn goose_target() { fuzz::call(goose_fn); }
+thread_fn typed_target() { fuzz::call_typed(typed_fn); }
+thread_fn slow_target() { fuzz::call(slow_fn); }
 
 fn law_true(d: const u8[:]) -> bool {
     return true;

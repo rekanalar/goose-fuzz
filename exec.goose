@@ -16,6 +16,14 @@ fn call<F>() {
     F(inp.data);
 }
 
+// Like call, for a typed target. F takes the Reader over the input
+// bytes. The crasher stays the raw bytes.
+fn call_typed<F>() {
+    let inp = qget<Input>();
+    var r = reader(inp.data);
+    F(r);
+}
+
 // Remove inputs that a target did not take.
 fn drain() {
     while true {

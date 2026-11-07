@@ -14,17 +14,36 @@ finding with its message and its source line, and the run goes on.
 Add this to the root file of the program that uses it:
 
 ```goose
-import fuzz from "rekanalar/goose-fuzz@v0.2.0";
+import fuzz from "rekanalar/goose-fuzz@v0.3.0";
 ```
 
 The child mode needs one more package in the same root file:
 
 ```goose
-import process from "rekanalar/goose-process@v0.1.1";
+import process from "rekanalar/goose-process@v1.0.0";
 ```
 
 The CI runs the gate on Linux, macOS and Windows. It uses Goose v2026.3 and
 v2026.4 on each.
+
+## What changed in v0.3.0
+
+The package gains three abilities. A dictionary of tokens steers the
+mutator. A target can read typed values from a `Reader`. The child mode
+can run several workers at once.
+
+One behavior changed. v0.2.0 gave every batch of the child mode the same
+seed. Each batch then repeated the inputs of the first batch. v0.3.0
+gives every batch and every worker its own seed, derived from the seed of
+the run. A seed still repeats a whole run.
+
+The child also takes two new optional arguments after the name: the
+dictionary file path and the token rate. A parent that passes only the
+seven arguments of v0.2.0 keeps working. A parent that passes only the seven arguments of v0.2.0 keeps
+working.
+
+Nothing else changed its name, its type or its result. The release is the
+minor tag `v0.3.0`.
 
 ## Use
 
@@ -33,7 +52,7 @@ hands it to the package. Call `fuzz::run`.
 
 ```goose
 import std;
-import fuzz from "rekanalar/goose-fuzz@v0.2.0";
+import fuzz from "rekanalar/goose-fuzz@v0.3.0";
 
 fn parse(d: const u8[:]) { /* may abort */ }
 
@@ -82,6 +101,17 @@ A `return` from `main` does not set the exit code of a built program. Call
 |---|---|
 | `fuzz::call(F)` | Call in the target `thread_fn`. Takes the input and calls `F` on it. |
 | `fuzz::call_law(F)` | As `call`, for `F(d) -> bool`. A false result aborts with `law failed`. |
+| `fuzz::call_typed(F)` | As `call`, for a typed target. `F` takes the `Reader` over the input. |
+| `fuzz::dict_add(cfg, token)` | Append one token to `cfg.dict` as an escaped line. False when the buffer is full or the token is empty. |
+| `fuzz::dict_load(cfg, path, err)` | Read a dictionary file in the libFuzzer format and append its text to `cfg.dict`. False on a bad line, with `line N:` in `err`. |
+| `fuzz::dict_parse(text, dpool, dends, err)` | Parse dictionary text into a token pool. Returns the count, or -1 with `line N:` in `err`. |
+| `fuzz::reader(data)` | Build a `Reader` over the bytes. |
+| `fuzz::read_bool(r)` | One byte as a `bool`. |
+| `fuzz::read_i64(r, lo, hi)` | Eight bytes into `[lo, hi]`. Refuses `lo > hi` with 0. |
+| `fuzz::read_string(r, max_len)` | Up to `max_len` bytes. |
+| `fuzz::read_i64_list(r, max_items)` | One count byte, then 8 bytes per item. |
+| `fuzz::cores()` | One worker for each core, probed from the system. |
+| `fuzz::derive_seed(seed, batch, worker)` | The seed of one batch of one worker. |
 | `fuzz::config()` | A `Config` with the defaults. |
 | `fuzz::run(name, cfg, rep, W)` | Fuzz the worker `W`. Fills `rep`. Returns the finding count, or -1 when the seed directory cannot be read. |
 | `fuzz::replay(name, crash_root, rep, W)` | Run every saved crasher once. Returns the number that aborted. Passed files: `rep.runs` minus that. |
@@ -108,6 +138,9 @@ A `return` from `main` does not set the exit code of a built program. Call
 | `seed_dir` | empty | A directory of seed files. Empty starts from the empty input. |
 | `crash_root` | empty | The crasher root. Empty means `fuzz/crashers`. |
 | `child` | empty | The program name of the child binary. Empty refuses the child mode. |
+| `workers` | 0 | The child workers that run at once. 0 picks one for each core, capped at 8. The valid range is 1 to 15. |
+| `token_rate` | 25 | The percent of mutations that use a token. |
+| `dict` | empty | The dictionary text, in the libFuzzer format. It holds at most 4096 bytes. |
 
 The run records the seed in `rep.seed`. `format_report` prints it. Pass it
 back as `cfg.seed` to repeat the run. The same seed makes the same inputs on
@@ -129,6 +162,67 @@ finding in `rep`. The files that passed are `rep.runs` minus that number.
 
 A save can fail. The finding stays in the report, its `saved` field is false
 and `rep.save_failed` counts it.
+
+## A dictionary
+
+A parser fuzzer needs the words of the protocol. Blind byte flips rarely
+build `<?xml` or `GET `. The mutator inserts a token, or writes it over
+input bytes, at `cfg.token_rate` percent. All choices come from the
+seeded generator, so a seed repeats a run. With no tokens the mutator
+makes the same inputs as v0.2.0.
+
+The text sits in `cfg.dict`, in the libFuzzer format:
+
+```
+# the words of the protocol
+word1="GET "
+word2="<?xml"
+name="\x00\xff"
+```
+
+A line is `"value"` or `name="value"`. A line that starts with `#` is a
+comment. A blank line is ignored. The escapes are `\\`, `\"` and
+`\xNN`. Duplicate tokens stay. Load a file with `dict_load`, or append
+one token with `dict_add`:
+
+```goose
+var cfg = fuzz::config();
+var err: u8[>..] = [];
+if !fuzz::dict_load(cfg, "words.dict", err) {
+    print(err);
+    exit(1);
+}
+fuzz::dict_add(cfg, "GOOSE");
+```
+
+A bad line fails the load and names the line. The dictionary text holds
+at most 4096 bytes. See `examples/dict.goose`.
+
+## Typed values
+
+A target that wants values, not bytes, reads them from a `Reader` over
+the mutated bytes:
+
+```goose
+fn logic(r: fuzz::Reader&) {
+    let n = fuzz::read_i64(r, 1000, 1010);
+    let flag = fuzz::read_bool(r);
+    let name = fuzz::read_string(r, 16);
+    let xs = fuzz::read_i64_list(r, 8);
+    if n > 1005 && flag { abort("typed"); }
+}
+
+thread_fn typed_target() { fuzz::call_typed(logic); }
+```
+
+Pass `typed_target` to `run`, `replay` or `shrink` as any worker. No read
+fails. A read past the end gives the default of its type: false, 0, the
+empty string or the empty list. A range with the low bound above the high
+bound is refused with 0.
+
+The same bytes give the same values in every run. The crasher stays the
+byte input, so replay and shrink work unchanged. See
+`examples/typed.goose`.
 
 ## The child mode
 
@@ -155,6 +249,19 @@ fn main() {
 The parent gives every child a limit of 10 seconds, so a hung child can
 never block the run. The name travels to the child as the last argument,
 so one binary can serve several targets.
+
+The parent writes its files in a private directory under `TMPDIR`. The
+name holds the seed and the clock, so two runs never share a file.
+
+With `cfg.workers` above 1 the parent starts that many children at once.
+The default of 0 picks one worker for each core, capped at 8. Each worker
+and each batch gets its own seed, derived from the seed of the run. No
+two batches repeat inputs.
+
+The parent merges the findings of all workers: one finding for each
+site, with the hits added up. A worker count above 15 is refused before
+any child starts. The handle table of the process package holds 16
+slots.
 
 ## Limits that stay
 
@@ -184,7 +291,11 @@ inside the package. Run one law for each `run`.
 
 The fuzzer has no coverage guidance. It does not learn which inputs reach new
 code. It mutates by bit flip, byte insert, byte delete and splice of two
-seeds.
+seeds. With a dictionary it inserts or overwrites with a token.
+
+The compiler gives no way to build coverage guidance. It would need
+`-fsanitize-coverage` and a map back to Goose lines through `#line`
+directives in the generated C. v2026.4 has neither.
 
 The child mode does the save-and-restart pattern of the older releases
 in the package itself. The watchdog pattern is no longer needed there: the

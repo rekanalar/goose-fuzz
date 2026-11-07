@@ -45,10 +45,13 @@ fn arg_int(a: u8[:][>..]&, k: i64, out: i64&) -> bool {
 }
 
 // The child side. Reads the seven arguments after the marker, in the
-// order seed_dir, max_len, seed, runs, saved path, crash root, name.
-// Loads the seeds, runs the batch, and writes each input to the saved
-// path before the run. A contained abort saves a crasher, like run does.
-// Returns 0 for a clean batch, 126 for a child-side error.
+// order seed_dir, max_len, seed, runs, saved path, crash root, name. A
+// parent that holds a dictionary appends the dictionary path and the
+// token rate as an eighth and a ninth argument. Seven arguments still
+// mean no dictionary, so an old parent keeps working. Loads the seeds,
+// runs the batch, and writes each input to the saved path before the
+// run. A contained abort saves a crasher, like run does. Returns 0 for
+// a clean batch, 126 for a child-side error.
 fn child_batch<W>() -> i32 {
     let a = args();
     let mark = marker_index();
@@ -74,6 +77,22 @@ fn child_batch<W>() -> i32 {
     if runs <= 0 || max_len <= 1 {
         return CHILD_ERROR;
     }
+    // The dictionary travels as the eighth argument, with the token rate
+    // as the ninth. A bad line in the file is skipped; the tokens before
+    // it stay.
+    var rate: i64 = DEFAULT_TOKEN_RATE;
+    var dpool: u8[>..] = [];
+    var dends: i64[>..] = [];
+    if mark + 8 < a.len {
+        var dtext: u8[>..] = [];
+        var derr: u8[>..] = [];
+        if read_file(a[mark + 8], dtext) {
+            dict_parse(dtext, dpool, dends, derr);
+        }
+        if mark + 9 < a.len {
+            arg_int(a, mark + 9, rate);
+        }
+    }
     var pool: u8[>..] = [];
     var ends: i64[>..] = [];
     if seed_dir.len > 0 {
@@ -90,7 +109,7 @@ fn child_batch<W>() -> i32 {
         if i < ends.len {
             cur.append(seed_at(pool, ends, i, max_len));
         } else if i >= first {
-            mutate_next(r, pool, ends, max_len, cur);
+            mutate_next_dict(r, pool, ends, max_len, dpool, dends, rate, cur);
         }
         // The input reaches the file before the run. A death then leaves
         // the input that caused it.
