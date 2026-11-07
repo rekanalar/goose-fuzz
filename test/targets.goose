@@ -57,7 +57,21 @@ fn always_fn(d: const u8[:]) {
     assert(false);
 }
 
+fn exit_fn(d: const u8[:]) {
+    if d.len > 0 && d[0] == 61 {
+        exit(3);
+    }
+}
+
+fn hang_fn(d: const u8[:]) {
+    if d.len > 0 && d[0] == 62 {
+        sleep_ms(30000);
+    }
+}
+
 thread_fn always_target() { fuzz::call(always_fn); }
+thread_fn exit_target() { fuzz::call(exit_fn); }
+thread_fn hang_target() { fuzz::call(hang_fn); }
 thread_fn ok_target() { fuzz::call(ok_fn); }
 thread_fn assert_target() { fuzz::call(assert_fn); }
 thread_fn index_target() { fuzz::call(index_fn); }

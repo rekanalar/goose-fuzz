@@ -11,6 +11,7 @@
 // exit code of a built program, so use exit.
 import std;
 import os;
+import process from "rekanalar/goose-process@v0.1.1";
 import fuzz from "..";
 
 fn parse(d: const u8[:]) {

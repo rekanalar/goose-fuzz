@@ -16,6 +16,9 @@ struct Config {
     seed_dir: u8[..255] = [],
     // Empty means fuzz/crashers.
     crash_root: u8[..255] = [],
+    // The program name of the child binary. Empty means the child mode
+    // is refused.
+    child: u8[..255] = [],
 }
 
 fn config() -> Config {

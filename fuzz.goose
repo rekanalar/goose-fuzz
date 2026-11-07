@@ -13,7 +13,9 @@ import exec;
 import mutate;
 import corpus;
 import shrink;
+import child;
 import os;
+import process from "rekanalar/goose-process@v0.1.1";
 
 // Run W on one input and count the run in rep. An abort is recorded.
 // Returns -2 when the input passed, else the finding index (-1 if dropped).
@@ -114,4 +116,101 @@ fn replay<W>(name: const u8[:], crash_root: const u8[:], rep: Report&) -> i64 {
         }
     }
     return failed;
+}
+
+// The parent side of the child mode.
+//
+// The parent runs the child in batches. A child that dies or hangs turns
+// its last saved input into a finding, and the run goes on. The root
+// file of the program declares the process package.
+const CHILD_BATCH = 500;
+const CHILD_LIMIT_MS = 10000;
+
+// Run the child over batches until cfg.runs or cfg.time_ms is met. An
+// escape case is a finding with a synthetic site: child:exit N when the
+// child ended with a code, child:stopped when the limit passed. Returns
+// the finding count, or -1 when the child name is empty, unknown, or the
+// child reports an error.
+fn run_isolated(name: const u8[:], cfg: const Config&, rep: Report&) -> i64 {
+    if cfg.child.len == 0 {
+        return -1;
+    }
+    var seed = cfg.seed;
+    if seed == 0 {
+        seed = random_seed();
+    }
+    rep.seed = seed;
+    let t0 = clock_ns();
+    var scratch: u8[>..] = [];
+    env("TMPDIR", scratch);
+    scratch.append("/fuzz-child-save");
+    var done: i64 = 0;
+    var saved: u8[>..] = [];
+    var site: u8[>..] = [];
+    var msg: u8[>..] = [];
+    while done < cfg.runs {
+        if cfg.time_ms > 0 && (clock_ns() - t0) / 1000000 >= cfg.time_ms {
+            break;
+        }
+        var batch = cfg.runs - done;
+        if batch > CHILD_BATCH {
+            batch = CHILD_BATCH;
+        }
+        var cargs: const u8[:][>..] = [];
+        cargs.push(CHILD_MARKER);
+        cargs.push(cfg.seed_dir);
+        var tlen: u8[>..] = [];
+        format_int(tlen, cfg.max_len, 10, 0, ' ');
+        cargs.push(tlen);
+        var tseed: u8[>..] = [];
+        format_int(tseed, seed as i64, 10, 0, ' ');
+        cargs.push(tseed);
+        var trun: u8[>..] = [];
+        format_int(trun, batch, 10, 0, ' ');
+        cargs.push(trun);
+        cargs.push(scratch);
+        cargs.push(cfg.crash_root);
+        cargs.push(name);
+        var opts = process::options();
+        opts.timeout_ms = CHILD_LIMIT_MS;
+        let r = process::run(cfg.child, cargs, "", opts);
+        if r.status == process::REFUSED || r.status == process::NOT_STARTED {
+            return -1;
+        }
+        if r.status == process::ENDED && r.code == CHILD_ERROR {
+            return -1;
+        }
+        // Every end below counts the batch as done, so the run reaches
+        // its run count even when the same input crashes every batch.
+        done += batch;
+        rep.runs += batch;
+        if r.status == process::ENDED && r.code == 0 {
+            continue;
+        }
+        // An escape case. The input the child saved last is the input
+        // that caused it.
+        saved.clear();
+        read_file(scratch, saved);
+        site.clear();
+        msg.clear();
+        if r.status == process::STOPPED {
+            site.append("child:stopped");
+            msg.append("the child was stopped on the time limit");
+        } else {
+            site.append("child:exit ");
+            format_int(site, r.code, 10, 0, ' ');
+            msg.append("the child ended with code ");
+            format_int(msg, r.code, 10, 0, ' ');
+        }
+        let at = record(rep, site, msg, saved);
+        if at >= 0 && rep.findings[at].count == 1 {
+            if save_crasher(cfg.crash_root, name, saved) {
+                rep.findings[at].saved = true;
+            } else {
+                rep.save_failed += 1;
+            }
+        }
+    }
+    delete_file(scratch);
+    return finding_count(rep);
 }

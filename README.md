@@ -3,8 +3,7 @@
 [![ci](https://github.com/rekanalar/goose-fuzz/actions/workflows/ci.yml/badge.svg)](https://github.com/rekanalar/goose-fuzz/actions/workflows/ci.yml)
 
 Fuzzing for Goose programs: seeded mutation, crash isolation, replay and
-shrinking. It is pure Goose and uses the standard library only. It works
-with Goose v2026.3 and v2026.4.
+shrinking. It works with Goose v2026.3 and v2026.4.
 
 The package runs your function on many mutated byte inputs. Each run happens
 in a contained worker. An abort ends only that run. The abort becomes a
@@ -15,7 +14,13 @@ finding with its message and its source line, and the run goes on.
 Add this to the root file of the program that uses it:
 
 ```goose
-import fuzz from "rekanalar/goose-fuzz@v0.1.0";
+import fuzz from "rekanalar/goose-fuzz@v0.2.0";
+```
+
+The child mode needs one more package in the same root file:
+
+```goose
+import process from "rekanalar/goose-process@v0.1.1";
 ```
 
 The CI runs the gate on Linux, macOS and Windows. It uses Goose v2026.3 and
@@ -28,7 +33,7 @@ hands it to the package. Call `fuzz::run`.
 
 ```goose
 import std;
-import fuzz from "rekanalar/goose-fuzz@v0.1.0";
+import fuzz from "rekanalar/goose-fuzz@v0.2.0";
 
 fn parse(d: const u8[:]) { /* may abort */ }
 
@@ -81,6 +86,9 @@ A `return` from `main` does not set the exit code of a built program. Call
 | `fuzz::run(name, cfg, rep, W)` | Fuzz the worker `W`. Fills `rep`. Returns the finding count, or -1 when the seed directory cannot be read. |
 | `fuzz::replay(name, crash_root, rep, W)` | Run every saved crasher once. Returns the number that aborted. Passed files: `rep.runs` minus that. |
 | `fuzz::run_one(input, why, W)` | Run one input. Returns false and fills `why` when it aborts. |
+| `fuzz::is_child()` | True when the program was started as a child of the parent mode. |
+| `fuzz::child_batch(W)` | The child side. Runs one batch, saves each input before the run. Exit code: 0 clean, 126 error. |
+| `fuzz::run_isolated(name, cfg, rep)` | The parent side. Runs the child in batches. A hang, a crash in C code, a stack overflow or a call to `exit` becomes a finding. |
 | `fuzz::shrink(input, out, W)` | Fill `out` with a shorter input that aborts at the same site. Returns false when `input` does not abort. |
 | `fuzz::format_report(out, rep)` | Append a text report. |
 | `fuzz::finding_count(rep)` | The number of findings. |
@@ -99,6 +107,7 @@ A `return` from `main` does not set the exit code of a built program. Call
 | `max_len` | 4096 | No input is longer. A seed file is cut to this length. |
 | `seed_dir` | empty | A directory of seed files. Empty starts from the empty input. |
 | `crash_root` | empty | The crasher root. Empty means `fuzz/crashers`. |
+| `child` | empty | The program name of the child binary. Empty refuses the child mode. |
 
 The run records the seed in `rep.seed`. `format_report` prints it. Pass it
 back as `cfg.seed` to repeat the run. The same seed makes the same inputs on
@@ -121,6 +130,32 @@ finding in `rep`. The files that passed are `rep.runs` minus that number.
 A save can fail. The finding stays in the report, its `saved` field is false
 and `rep.save_failed` counts it.
 
+## The child mode
+
+The four cases at the end of the limits list end the whole program. The
+child mode turns them into findings. The parent runs the fuzzer again as a
+child process, in batches. The child saves every input to a file before it
+runs it. When the child dies or hangs, the parent reads that file, records
+a finding and starts the next child.
+
+```goose
+fn main() {
+    if fuzz::is_child() {
+        exit(fuzz::child_batch(target));
+    }
+    var cfg = fuzz::config();
+    cfg.child.append(args()[0]);
+    cfg.runs = 50000;
+    var rep = fuzz::Report { };
+    let found = fuzz::run_isolated("parse", cfg, rep);
+    /* the report and the crashers, as with run */
+}
+```
+
+The parent gives every child a limit of 10 seconds, so a hung child can
+never block the run. The name travels to the child as the last argument,
+so one binary can serve several targets.
+
 ## Limits that stay
 
 A contained worker catches an abort. It cannot catch these cases. They end
@@ -130,6 +165,16 @@ the whole program:
 - A crash in C code.
 - A stack overflow or a guard-page hit.
 - A call to `exit` in the target.
+
+The child mode catches all four. Its findings carry synthetic sites:
+`child:exit N` or `child:stopped`, because the child cannot report its
+abort line across its own death. The input is still exact, and the replay
+still runs it. A crasher whose target kills the process has no replay in
+one process; run it through the child mode instead.
+
+The child reports an error with the code 126. A target that calls
+`exit(126)` collides with it. The parent then reports a hard error and
+starts no child again.
 
 Goose also refuses a global variable that is not flat inside a worker. The
 compiler reports this error. Pass such data in the input instead.
@@ -141,21 +186,9 @@ The fuzzer has no coverage guidance. It does not learn which inputs reach new
 code. It mutates by bit flip, byte insert, byte delete and splice of two
 seeds.
 
-### Pattern: save the input, then restart
-
-Write each input to a file before the run. If the program dies, the file
-holds the input that killed it. On the next start, replay that file as a
-crasher. Use a script that restarts the program until it ends clean.
-
-This pattern is not tested in this package.
-
-### Pattern: a watchdog worker
-
-A second worker can watch the clock. When a run takes too long, it saves the
-current input and calls `exit`. This ends the program, so combine it with the
-restart pattern.
-
-This pattern is not verified.
+The child mode does the save-and-restart pattern of the older releases
+in the package itself. The watchdog pattern is no longer needed there: the
+parent stops a hung child at its limit.
 
 ## Not verified
 
@@ -164,6 +197,10 @@ This pattern is not verified.
 - The rate on a real parser. The rate on a trivial target is 19000 runs a
   second on v2026.4. On v2026.3 it falls as aborting runs add up.
 - The watchdog and the restart patterns.
+- The child mode on Windows. The CI runs the suite there, including the
+  child cases, but no machine of this project runs Windows.
+- The rate of the child mode on macOS and Windows. The Linux rate is
+  10000 inputs a second on a trivial target.
 
 ## Test
 
