@@ -18,7 +18,8 @@ Add this to the root file of the program that uses it:
 import fuzz from "rekanalar/goose-fuzz@v0.1.0";
 ```
 
-The tag `v0.1.0` does not exist yet.
+The CI runs the gate on Linux, macOS and Windows. It uses Goose v2026.3 and
+v2026.4 on each.
 
 ## Use
 
@@ -158,7 +159,8 @@ This pattern is not verified.
 
 ## Not verified
 
-- macOS and its threads. The CI matrix covers macOS. No result exists yet.
+- Windows with a compiler other than MSVC. The CI uses the Visual Studio
+  that the runner has.
 - The rate on a real parser. The rate on a trivial target is 19000 runs a
   second on v2026.4. On v2026.3 it falls as aborting runs add up.
 - The watchdog and the restart patterns.
