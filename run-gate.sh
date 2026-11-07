@@ -9,7 +9,10 @@
 set -uo pipefail
 
 compiler_dir="${1:-}"
-if [[ -z "$compiler_dir" || ! -x "$compiler_dir/goose" ]]; then
+# Windows ships goose.exe.
+goose="$compiler_dir/goose"
+[[ -x "$goose" ]] || goose="$compiler_dir/goose.exe"
+if [[ -z "$compiler_dir" || ! -x "$goose" ]]; then
     echo "usage: TMPDIR=dir bash run-gate.sh <goose-release-dir>" >&2
     exit 2
 fi
@@ -19,7 +22,6 @@ if [[ -z "${TMPDIR:-}" || ! -d "$TMPDIR" ]]; then
 fi
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-goose="$compiler_dir/goose"
 work="$(mktemp -d "$TMPDIR/fuzz-gate.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 cd "$here"

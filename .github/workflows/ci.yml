@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         tag: [v2026.3, v2026.4]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -33,11 +33,18 @@ jobs:
           case "$RUNNER_OS" in
             Linux) asset="linux-x64.tar.gz" ;;
             macOS) asset="macos-arm64.tar.gz" ;;
+            Windows) asset="windows-x64.zip" ;;
           esac
           url="https://github.com/aardappel/goose/releases/download/${tag}/goose-${tag}-${asset}"
-          curl -fsSL "$url" -o "$dest/goose.tar.gz"
-          tar -xzf "$dest/goose.tar.gz" -C "$dest"
-          exe=$(find "$dest" -type f -name goose | head -1)
+          if [ "$RUNNER_OS" = Windows ]; then
+            curl -fsSL "$url" -o "$dest/goose.zip"
+            7z x -y -o"$dest" "$dest/goose.zip" > /dev/null
+            exe=$(find "$dest" -type f -name goose.exe | head -1)
+          else
+            curl -fsSL "$url" -o "$dest/goose.tar.gz"
+            tar -xzf "$dest/goose.tar.gz" -C "$dest"
+            exe=$(find "$dest" -type f -name goose | head -1)
+          fi
           chmod +x "$exe"
           echo "$(dirname "$exe")" > "$RUNNER_TEMP/goose-dir"
           "$exe" --help | head -3
