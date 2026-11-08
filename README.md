@@ -265,9 +265,12 @@ needs speed.
 `test/cov.goose` pins the claim. A target opens three stages, one byte
 for each. With the seed 1 and 20000 runs, the guided run finds the abort.
 
-Guidance helps and does not guarantee. A stage that needs many exact bytes
-can stall a run. The mutator flips bits and inserts bytes. It has no byte
-overwrite.
+Guidance helps and does not guarantee. A target that needs five exact
+bytes can stall a run. The measure of this package used three exact
+bytes. A blind run found the abort on none of eight seeds. The guided
+run found it on seven.
+
+The mutator flips bits and inserts bytes. It has no byte overwrite.
 
 ## The child mode
 
@@ -369,7 +372,9 @@ working with no dictionary.
 
 The coverage tells how much code a run reached. It names no source line.
 The generated C of the compiler holds no `#line` directive, so a program
-counter has no Goose line. The report gives counts only.
+counter has no Goose line. The coverage part of the report gives counts
+only. A finding still names its own line. The abort message carries the
+file and the line of the abort, and the report gives that pair.
 
 The child mode has no coverage guidance. Each child is a fresh process,
 and its record of the code dies with it. The report of the parent names
