@@ -203,7 +203,7 @@ fn test_run() {
     assert(fuzz::run("ok", cfg, rep, targets::ok_target) == 0);
     assert(rep.runs == 1000);
     assert(rep.seed == 5);
-    // planted assert at targets.goose:14, ten fixed seeds, SC-001
+    // The planted assert at targets.goose:14 runs with ten fixed seeds.
     cfg.runs = 10000;
     for sd in 1..11 {
         cfg.seed = sd as u64;
@@ -754,7 +754,7 @@ fn test_dict() {
     delete_dir(root);
 }
 
-// SC-001: the token steers the mutator to the prefix abort.
+// The token steers the mutator to the prefix abort.
 fn test_dict_run() {
     var root: u8[>..] = [];
     env("TMPDIR", root);
@@ -918,7 +918,7 @@ fn test_reader() {
     assert(fuzz::read_i64_list(r7, 10).len == 0);
 }
 
-// SC-004 and SC-005: the typed target finds, replays and shrinks.
+// The typed target finds, replays and shrinks.
 fn test_typed() {
     var root: u8[>..] = [];
     env("TMPDIR", root);
@@ -1044,8 +1044,8 @@ fn test_parallel() {
     delete_dir(root);
 }
 
-// SC-006: four workers finish a slow run in two thirds of the time of
-// one worker. The check needs four cores, so a smaller machine skips it.
+// Four workers finish a slow run in two thirds of the time of one
+// worker. The check needs four cores, so a smaller machine skips it.
 fn test_speedup() {
     if fuzz::cores() < 4 {
         print("speedup skipped: fewer than four cores");
