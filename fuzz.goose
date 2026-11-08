@@ -9,6 +9,7 @@ import fnv;
 import site;
 import report;
 import config;
+import cov;
 import exec;
 import mutate;
 import dict;
@@ -43,6 +44,9 @@ fn run<W>(name: const u8[:], cfg: const Config&, rep: Report&) -> i64 {
             return -1;
         }
     }
+    // The corpus of the last run is a seed of this run. A corpus
+    // directory that does not exist holds no files.
+    var corpus_files = load_corpus(cfg.corpus_root, name, cfg.max_len, pool, ends);
     var seed = cfg.seed;
     if seed == 0 {
         seed = random_seed();
@@ -63,6 +67,8 @@ fn run<W>(name: const u8[:], cfg: const Config&, rep: Report&) -> i64 {
     if limit == 0 {
         limit = first;
     }
+    // The coverage of this run starts empty.
+    cov_reset();
     let t0 = clock_ns();
     var cur: u8[>..] = [];
     var why: u8[>..] = [];
@@ -72,12 +78,32 @@ fn run<W>(name: const u8[:], cfg: const Config&, rep: Report&) -> i64 {
             break;
         }
         cur.clear();
-        if i < ends.len {
+        if i < first && i < ends.len {
             cur.append(seed_at(pool, ends, i, cfg.max_len));
         } else if i >= first {
             mutate_next_dict(r, pool, ends, cfg.max_len, dpool, dends, cfg.token_rate, cur);
         }
         let at = try_input(cur, rep, why, site, W);
+        // The count of the edges that this input reached first. It is
+        // zero without the coverage.
+        let fresh = cov_end();
+        if fresh > 0 {
+            rep.interesting += 1;
+            // The input joins the seeds of the later mutations.
+            pool.append(cur);
+            ends.push(pool.len);
+            // The corpus keeps the input for the next run.
+            if corpus_files < CORPUS_MAX {
+                let made = save_corpus(cfg.corpus_root, name, cur);
+                if made > 0 {
+                    corpus_files += 1;
+                } else if made < 0 {
+                    rep.corpus_dropped += 1;
+                }
+            } else {
+                rep.corpus_dropped += 1;
+            }
+        }
         if at >= 0 && rep.findings[at].count == 1 {
             if save_crasher(cfg.crash_root, name, cur) {
                 rep.findings[at].saved = true;
@@ -86,6 +112,8 @@ fn run<W>(name: const u8[:], cfg: const Config&, rep: Report&) -> i64 {
             }
         }
     }
+    rep.edges = cov_total() as i64;
+    rep.edges_lost = cov_lost() as i64;
     return finding_count(rep);
 }
 
@@ -105,6 +133,20 @@ fn format_report(out: u8[>..]&, rep: const Report&) {
         out.append(": ");
         out.append(finding_message(rep, i));
         out.append("\n");
+    }
+    // The coverage comes last, and only a program that was built with
+    // the coverage flag has it.
+    if cov_live() {
+        out.append("edges: ");
+        format_int(out, rep.edges, 10, 0, ' ');
+        out.append("\ninteresting: ");
+        format_int(out, rep.interesting, 10, 0, ' ');
+        out.append("\n");
+        if rep.edges_lost > 0 {
+            out.append("edges lost: ");
+            format_int(out, rep.edges_lost, 10, 0, ' ');
+            out.append("\n");
+        }
     }
 }
 

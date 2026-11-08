@@ -2,8 +2,8 @@
 
 [![ci](https://github.com/rekanalar/goose-fuzz/actions/workflows/ci.yml/badge.svg)](https://github.com/rekanalar/goose-fuzz/actions/workflows/ci.yml)
 
-Fuzzing for Goose programs: seeded mutation, crash isolation, replay and
-shrinking. It works with Goose v2026.3 and v2026.4.
+Fuzzing for Goose programs: seeded mutation, coverage guidance, crash
+isolation, replay and shrinking. It works with Goose v2026.3 and v2026.4.
 
 The package runs your function on many mutated byte inputs. Each run happens
 in a contained worker. An abort ends only that run. The abort becomes a
@@ -14,7 +14,7 @@ finding with its message and its source line, and the run goes on.
 Add this to the root file of the program that uses it:
 
 ```goose
-import fuzz from "rekanalar/goose-fuzz@v1.0.0";
+import fuzz from "rekanalar/goose-fuzz@v1.1.0";
 ```
 
 The child mode needs one more package in the same root file:
@@ -33,7 +33,7 @@ hands it to the package. Call `fuzz::run`.
 
 ```goose
 import std;
-import fuzz from "rekanalar/goose-fuzz@v1.0.0";
+import fuzz from "rekanalar/goose-fuzz@v1.1.0";
 
 fn parse(d: const u8[:]) { /* may abort */ }
 
@@ -58,6 +58,12 @@ Goose does not allow a generic `thread_fn`, so you write the one line yourself. 
 worker name is always the last argument.
 
 See `examples/parser.goose` for a complete program.
+
+## The C part
+
+The package holds one C file, `src/cov.c`. It records the code that a run
+reached. It needs no library and no system call beyond the C runtime. The
+Goose compiler builds it with the C compiler of the machine.
 
 ## Build and run
 
@@ -91,6 +97,8 @@ A `return` from `main` does not set the exit code of a built program. Call
 | `fuzz::read_i64(r, lo, hi)` | Eight bytes into `[lo, hi]`. Refuses `lo > hi` with 0. |
 | `fuzz::read_string(r, max_len)` | Up to `max_len` bytes. |
 | `fuzz::read_i64_list(r, max_items)` | One count byte, then 8 bytes per item. |
+| `fuzz::cov_live()` | True when the program was built with the coverage compiler. |
+| `fuzz::coverage_path(out)` | Write the path of the `cov-cc` script of the installed package into `out`. False when the path has an unexpected form. |
 | `fuzz::cores()` | One worker for each core, probed from the system. |
 | `fuzz::derive_seed(seed, batch, worker)` | The seed of one batch of one worker. |
 | `fuzz::config()` | A `Config` with the defaults. |
@@ -118,6 +126,7 @@ A `return` from `main` does not set the exit code of a built program. Call
 | `max_len` | 4096 | No input is longer. A seed file is cut to this length. |
 | `seed_dir` | empty | A directory of seed files. Empty starts from the empty input. |
 | `crash_root` | empty | The crasher root. Empty means `fuzz/crashers`. |
+| `corpus_root` | empty | The corpus root. Empty means `fuzz/corpus`. |
 | `child` | empty | The program name of the child binary. Empty refuses the child mode. |
 | `workers` | 0 | The child workers that run at once. 0 picks one for each core, capped at 8. The valid range is 1 to 15. |
 | `token_rate` | 25 | The percent of mutations that use a token. |
@@ -205,6 +214,61 @@ The same bytes give the same values in every run. The crasher stays the
 byte input, so replay and shrink work unchanged. See
 `examples/typed.goose`.
 
+## Coverage guidance
+
+The fuzzer can learn which inputs reach new code. Build the program with
+the coverage compiler of the package. An input that reaches code that no
+earlier input reached is *interesting*. The run keeps it as a seed for
+later mutations, as libFuzzer and Go do. The run also saves it in the
+corpus directory, so the next run starts from it.
+
+Ask the package for the path of its compiler script. Then build with it:
+
+```goose
+var path: u8[>..] = [];
+if fuzz::coverage_path(path) {
+    print(path);
+}
+```
+
+```sh
+GOOSE_CC=/path/printed/above goose build --debug your_fuzzer.goose -o your_fuzzer
+./your_fuzzer
+```
+
+The script `cov-cc` calls the C compiler of the machine with
+`-fsanitize-coverage=trace-pc`. This is the step that libFuzzer asks of
+its caller: pass the sanitizer flag. The script uses the first of `clang`,
+`gcc` and `cc` that it finds. Set `GOOSE_COVER_CC` to name another one.
+
+A coverage run adds two lines to the report:
+
+```
+edges: 513
+interesting: 9
+```
+
+`edges` counts the distinct pieces of code that the run reached. A
+program built without the script has no coverage. Its report has neither
+line, and the run behaves as it did before.
+
+The corpus lives in `<corpus_root>/<name>`. An empty root means
+`fuzz/corpus`. A file holds one input, and its name is the hash of the
+input. A run reads the files of that directory as seeds at its start. The
+corpus holds at most 4096 files. The report counts the inputs that the
+cap turned away in `corpus_dropped`.
+
+The flag makes the target run about six times slower. The measure is a
+tight loop on gcc 15.2 on Linux. Build the plain program for a run that
+needs speed.
+
+`test/cov.goose` pins the claim. A target opens three stages, one byte
+for each. With the seed 1 and 20000 runs, the guided run finds the abort.
+
+Guidance helps and does not guarantee. A stage that needs many exact bytes
+can stall a run. The mutator flips bits and inserts bytes. It has no byte
+overwrite.
+
 ## The child mode
 
 The four cases at the end of the limits list end the whole program. The
@@ -254,6 +318,8 @@ into a directory. These protections go beyond the reference libraries.
   not the whole run.
 - The number of workers is capped at 15, so a machine with many cores
   starts no more children than that.
+- The corpus holds at most 4096 files. A target that keeps reaching new
+  code cannot fill the disk of the caller.
 - No input is longer than `max_len`, and the dictionary holds at most 4096
   bytes. A seed file or a dictionary from an untrusted source cannot make
   the package hold a long text.
@@ -264,6 +330,10 @@ These risks stay.
   name a program that it trusts.
 - The package writes the crashing inputs into the crasher root of the
   caller. An input may hold a secret of the program under test.
+- The corpus files hold inputs of the program under test, as the
+  crasher files do. An input may hold a secret of that program.
+- The `cov-cc` script runs the compiler that `GOOSE_COVER_CC` names. A
+  caller must name a compiler that it trusts.
 - The dictionary file is read as text. A bad line is refused with the line
   number, and no line of it runs as code.
 
@@ -297,13 +367,29 @@ The child takes two optional arguments after the name: the dictionary file
 path and the token rate. A parent that passes only seven arguments keeps
 working with no dictionary.
 
-The fuzzer has no coverage guidance. It does not learn which inputs reach new
-code. It mutates by bit flip, byte insert, byte delete and splice of two
-seeds. With a dictionary it inserts or overwrites with a token.
+The coverage tells how much code a run reached. It names no source line.
+The generated C of the compiler holds no `#line` directive, so a program
+counter has no Goose line. The report gives counts only.
 
-The compiler gives no way to build coverage guidance. It would need
-`-fsanitize-coverage` and a map back to Goose lines through `#line`
-directives in the generated C. v2026.4 has neither.
+The child mode has no coverage guidance. Each child is a fresh process,
+and its record of the code dies with it. The report of the parent names
+no edges.
+
+MSVC has no coverage flag. A program built with MSVC behaves as a
+program without the script. The gate skips the coverage step on Windows.
+
+The record of the code holds 65536 addresses. A program with more
+reaches the limit, and the extra addresses go unseen. The report then
+adds a line `edges lost: N`. Guidance still works on the addresses that
+fit, but it cannot see new code behind the lost ones.
+
+The coverage marks an input interesting when it reaches code that no
+earlier input reached. It does not weigh how often an edge ran. The
+coverage flag is `trace-pc`, which gives no record of compared values.
+
+A run reads `fuzz/corpus/<name>` at its start when that directory exists,
+or the directory of `corpus_root`. The files there change the inputs of
+the run. To keep the old inputs, point `corpus_root` at an empty directory.
 
 The child mode does the save-and-restart pattern of the older releases
 in the package itself. The watchdog pattern is no longer needed there: the

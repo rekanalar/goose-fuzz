@@ -1,0 +1,5 @@
+// The sidecar of the fuzz package.
+//
+// The C part holds the runtime of the coverage. The compiler of the
+// build compiles it with the same flags as the rest of the package.
+c_sources = ["src/cov.c"];

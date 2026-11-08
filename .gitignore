@@ -5,3 +5,6 @@
 *.a
 /build/
 /out/
+
+# The default corpus and crasher roots of a run in this directory
+/fuzz/

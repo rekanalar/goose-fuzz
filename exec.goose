@@ -13,7 +13,9 @@ struct Input {
 // Call this in the target thread_fn: it takes the input and calls F on it.
 fn call<F>() {
     let inp = qget<Input>();
+    cov_begin();
     F(inp.data);
+    let _ = cov_end();
 }
 
 // Like call, for a typed target. F takes the Reader over the input
@@ -21,7 +23,9 @@ fn call<F>() {
 fn call_typed<F>() {
     let inp = qget<Input>();
     var r = reader(inp.data);
+    cov_begin();
     F(r);
+    let _ = cov_end();
 }
 
 // Remove inputs that a target did not take.
@@ -42,6 +46,10 @@ fn run_one<W>(input: const u8[:], why: u8[>..]&) -> bool {
     qput(Input { copy(buf) });
     let id = thread_spawn_contained(W);
     let ok = thread_wait(id, why);
+    // Close the bracket before this thread runs its own code. An abort
+    // leaves the bracket open, and the code of the harness would then
+    // count as new code of the input.
+    let _ = cov_end();
     drain();
     return ok;
 }
@@ -49,7 +57,9 @@ fn run_one<W>(input: const u8[:], why: u8[>..]&) -> bool {
 // Like call, for a law F(d) -> bool. A false result aborts with "law failed".
 fn call_law<F>() {
     let inp = qget<Input>();
+    cov_begin();
     if !F(inp.data) {
         abort("law failed");
     }
+    let _ = cov_end();
 }

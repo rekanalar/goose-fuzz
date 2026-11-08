@@ -16,6 +16,9 @@ struct Config {
     seed_dir: u8[..255] = [],
     // Empty means fuzz/crashers.
     crash_root: u8[..255] = [],
+    // The corpus directory. The interesting inputs of a run go there,
+    // and the next run takes them as seeds. Empty means fuzz/corpus.
+    corpus_root: u8[..255] = [],
     // The program name of the child binary. Empty means the child mode
     // is refused.
     child: u8[..255] = [],

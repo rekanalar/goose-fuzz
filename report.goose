@@ -24,6 +24,17 @@ struct Report {
     // Aborts at a 257th site and later.
     dropped: i64 = 0,
     save_failed: i64 = 0,
+    // The distinct edges that the run reached. It is zero without the
+    // coverage.
+    edges: i64 = 0,
+    // The addresses that found the table of the edges full, and so
+    // went unseen. It is zero without the coverage.
+    edges_lost: i64 = 0,
+    // The inputs that reached an edge that no earlier input reached.
+    // It is zero without the coverage.
+    interesting: i64 = 0,
+    // The interesting inputs that the cap of the corpus turned away.
+    corpus_dropped: i64 = 0,
     findings: Finding[..256] = [],
     // The arena must stay the last field.
     arena: u8[>..] = [],

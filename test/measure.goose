@@ -7,6 +7,7 @@
 // Measure memory outside Goose: /usr/bin/time -f %M ./measure 100000 abort
 import std;
 import os;
+import process from "rekanalar/goose-process@v1.0.0";
 import fuzz from "..";
 
 fn fine(d: const u8[:]) {

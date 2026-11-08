@@ -447,6 +447,54 @@ fn test_limits() {
     clean_dir(dir);
 }
 
+// The coverage fields hold in a plain build and in a coverage build. A
+// program without the coverage flag finds nothing interesting, writes no
+// corpus file, and names no coverage in its report. The same run of two
+// programs gives the same inputs.
+fn test_coverage_fields() {
+    var root: u8[>..] = [];
+    env("TMPDIR", root);
+    root.append("/fuzz-run-cov");
+    var croot: u8[>..] = [];
+    croot.append(root);
+    croot.append("/corpus");
+    var cfg = fuzz::config();
+    cfg.seed = 3;
+    cfg.runs = 50;
+    cfg.corpus_root.append(croot);
+    cfg.crash_root.append(root);
+    cfg.crash_root.append("/crashers");
+    var rep = fuzz::Report { };
+    assert(fuzz::run("ok-cov", cfg, rep, targets::ok_target) == 0);
+    assert(rep.runs == 50);
+    assert(rep.interesting <= rep.runs);
+    assert(rep.corpus_dropped == 0);
+    var text: u8[>..] = [];
+    fuzz::format_report(text, rep);
+    if !fuzz::cov_live() {
+        assert(rep.edges == 0 && rep.interesting == 0);
+        assert(find(text, "edges") < 0);
+        var dir: u8[>..] = [];
+        fuzz::corpus_dir(croot, "ok-cov", dir);
+        assert(!is_dir(dir));
+    } else {
+        assert(find(text, "edges: ") >= 0);
+    }
+    // The corpus directory defaults to fuzz/corpus.
+    var d: u8[>..] = [];
+    fuzz::corpus_dir("", "n", d);
+    assert(d == "fuzz/corpus/n");
+    var d2: u8[>..] = [];
+    fuzz::corpus_dir("x", "n", d2);
+    assert(d2 == "x/n");
+    var sub: u8[>..] = [];
+    sub.append(croot);
+    sub.append("/ok-cov");
+    clean_dir(sub);
+    delete_dir(croot);
+    delete_dir(root);
+}
+
 fn main() {
     if fuzz::is_child() {
         // A built binary takes its exit code from exit, not from the
@@ -488,6 +536,7 @@ fn main() {
     test_dict_run();
     test_dict_child();
     test_reader();
+    test_coverage_fields();
     test_typed();
     test_parallel();
     test_speedup();

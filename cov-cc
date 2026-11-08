@@ -1,0 +1,30 @@
+#!/bin/sh
+# The coverage compiler of the fuzz package.
+#
+# It calls the C compiler of the machine with the coverage flag of the
+# sanitizer. The compiler then records the code that a run reaches, and
+# the fuzz package reads those records.
+#
+#   GOOSE_CC=/path/to/cov-cc goose build fuzzer.goose -o fuzzer
+#
+# The compiler is the first of clang, gcc and cc that the machine has.
+# Set GOOSE_COVER_CC to name another one. The script fails when the
+# machine has no C compiler.
+#
+# The flag costs about six times the run time of the target. Build the
+# program without the wrapper for a plain run.
+
+real=""
+for candidate in "$GOOSE_COVER_CC" clang gcc cc; do
+    if [ -n "$candidate" ] && command -v "$candidate" > /dev/null 2>&1; then
+        real="$candidate"
+        break
+    fi
+done
+
+if [ -z "$real" ]; then
+    echo "cov-cc: no C compiler found. Set GOOSE_COVER_CC to one." >&2
+    exit 1
+fi
+
+exec "$real" -fsanitize-coverage=trace-pc "$@"
