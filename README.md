@@ -249,9 +249,9 @@ slots.
 The package runs the program that a caller names and writes the findings
 into a directory. These protections go beyond the reference libraries.
 
-- The child mode stops a child that hangs at the time limit of the
-  configuration. The input becomes a finding, so a hang in the target ends
-  one child and not the whole run.
+- The child mode stops a child that hangs at the limit of 10 seconds.
+  The input becomes a finding, so a hang in the target ends one child and
+  not the whole run.
 - The number of workers is capped at 15, so a machine with many cores
   starts no more children than that.
 - No input is longer than `max_len`, and the dictionary holds at most 4096
