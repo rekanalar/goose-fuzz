@@ -244,6 +244,29 @@ site, with the hits added up. A worker count above 15 is refused before
 any child starts. The handle table of the process package holds 16
 slots.
 
+## Security
+
+The package runs the program that a caller names and writes the findings
+into a directory. These protections go beyond the reference libraries.
+
+- The child mode stops a child that hangs at the time limit of the
+  configuration. The input becomes a finding, so a hang in the target ends
+  one child and not the whole run.
+- The number of workers is capped at 15, so a machine with many cores
+  starts no more children than that.
+- No input is longer than `max_len`, and the dictionary holds at most 4096
+  bytes. A seed file or a dictionary from an untrusted source cannot make
+  the package hold a long text.
+
+These risks stay.
+
+- The child mode starts the program that the caller names. A caller must
+  name a program that it trusts.
+- The package writes the crashing inputs into the crasher root of the
+  caller. An input may hold a secret of the program under test.
+- The dictionary file is read as text. A bad line is refused with the line
+  number, and no line of it runs as code.
+
 ## Limits that stay
 
 A contained worker catches an abort. It cannot catch these cases. They end
