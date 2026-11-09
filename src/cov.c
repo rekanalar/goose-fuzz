@@ -78,7 +78,9 @@ static int gs_cov_busy = 0;
 // The callback must not be instrumented. The compiler of the build
 // compiles this file with the same wrapper, and an instrumented
 // callback calls itself until the program dies.
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__clang__)
+#define GS_COV_CLEAN __attribute__((no_sanitize("coverage")))
+#elif defined(__GNUC__)
 #define GS_COV_CLEAN __attribute__((no_sanitize_coverage))
 #else
 #define GS_COV_CLEAN
@@ -86,7 +88,7 @@ static int gs_cov_busy = 0;
 
 // The class of a hit count. One input that runs an edge 200 times
 // reaches the last class, and one that runs it once reaches the second.
-static uint8_t gs_cov_class_of(uint32_t n) {
+GS_COV_CLEAN static uint8_t gs_cov_class_of(uint32_t n) {
     if (n == 0) return 0;
     if (n == 1) return 1;
     if (n == 2) return 2;
@@ -178,6 +180,9 @@ GS_COV_CLEAN void gs_cov_begin(void) {
 // new edge rises too, because its class leaves zero. The worker of the
 // input closes it. The main thread closes it after an abort.
 GS_COV_CLEAN uint64_t gs_cov_end(void) {
+    // The thread stops recording first, so the loop below adds no
+    // counts of its own, whatever the compiler did with the attribute.
+    gs_cov_mine = 0;
     if (gs_cov_active) {
         uint64_t rises = 0;
         for (uint32_t k = 0; k < gs_cov_ntouched; k++) {
@@ -196,7 +201,6 @@ GS_COV_CLEAN uint64_t gs_cov_end(void) {
         gs_cov_rises_last = rises;
         gs_cov_active = 0;
     }
-    gs_cov_mine = 0;
     return gs_cov_rises_last;
 }
 
