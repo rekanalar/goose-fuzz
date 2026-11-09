@@ -30,11 +30,30 @@ struct Report {
     // The addresses that found the table of the edges full, and so
     // went unseen. It is zero without the coverage.
     edges_lost: i64 = 0,
-    // The inputs that reached an edge that no earlier input reached.
-    // It is zero without the coverage.
+    // The inputs that made the class of an edge rise above the class
+    // of any earlier input. It is zero without the coverage.
     interesting: i64 = 0,
     // The interesting inputs that the cap of the corpus turned away.
     corpus_dropped: i64 = 0,
+    // The edges whose highest class is the index. The index 0 holds
+    // the edges that no input of the run reached, and it is the
+    // distinct edges minus the rest. The classes hold 1 to 8.
+    class_edges: i64[9] = [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    // The mutations of each kind. The kinds 0 to 5 keep their meaning,
+    // and the kinds 6 to 19 are the new kinds. A mutation of the
+    // caller holds no kind.
+    kind_count: i64[20] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    // The inputs that ended the probe of the parent. Such an input is
+    // slow, and not a hang.
+    slow: i64 = 0,
+    // The seeds that spent their energy and left the pool.
+    seeds_retired: i64 = 0,
+    // The highest score of the run. The score is the value of the
+    // target in the score mode 1, and the time of the run in the
+    // score mode 2. Zero without a score mode, and in the child mode.
+    best_score: f64 = 0.0,
+    best_off: i64 = 0,
+    best_len: i64 = 0,
     findings: Finding[..256] = [],
     // The arena must stay the last field.
     arena: u8[>..] = [],
@@ -61,6 +80,12 @@ fn finding_input(rep: const Report&, i: i64) -> const u8[:] {
 
 fn finding_hits(rep: const Report&, i: i64) -> i64 {
     return rep.findings[i].count;
+}
+
+// The input that holds the best score. Empty when the run holds no
+// score.
+fn best_input(rep: const Report&) -> const u8[:] {
+    return rep.arena[rep.best_off..rep.best_off + rep.best_len];
 }
 
 // The index of the finding with this site, or -1.

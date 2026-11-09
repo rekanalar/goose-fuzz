@@ -1,8 +1,9 @@
 // The coverage of the program.
 //
-// The C part of the package records the code that each input reaches.
-// A program that was built without the coverage flag never calls the
-// callback of the sanitizer, and the counters stay at zero.
+// The C part of the package records the code that each input reaches,
+// and how often each piece ran. A program that was built without the
+// coverage flag never calls the callback of the sanitizer, and the
+// counters stay at zero.
 //
 // The compiler of the generated C holds no line directive, so the
 // counters name no source line.
@@ -16,6 +17,7 @@ extern fn gs_cov_begin();
 extern fn gs_cov_end() -> u64;
 extern fn gs_cov_total_edges() -> u64;
 extern fn gs_cov_lost_edges() -> u64;
+extern fn gs_cov_class_edges(cls: i64) -> u64;
 extern fn gs_cov_live() -> bool;
 extern fn gs_cov_script(out: u8[>..]&) -> bool;
 
@@ -30,9 +32,10 @@ fn cov_begin() {
     gs_cov_begin();
 }
 
-// Close the bracket of one input. It gives the count of the edges that
-// no earlier input reached. The worker of the input closes it. The main
-// thread closes it after an abort.
+// Close the bracket of one input. It gives the count of the edges
+// whose class of hit count rose above the class of any earlier input
+// of the run. A new edge rises too. The worker of the input closes it.
+// The main thread closes it after an abort.
 fn cov_end() -> u64 {
     return gs_cov_end();
 }
@@ -45,6 +48,12 @@ fn cov_total() -> u64 {
 // The count of the addresses that found the table full.
 fn cov_lost() -> u64 {
     return gs_cov_lost_edges();
+}
+
+// The count of the edges whose highest class is cls, from 1 to 8. The
+// class of an edge is the class of its highest hit count of the run.
+fn cov_class_edges(cls: i64) -> u64 {
+    return gs_cov_class_edges(cls);
 }
 
 // True when the program was built with the coverage flag.

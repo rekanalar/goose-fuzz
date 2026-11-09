@@ -121,11 +121,94 @@ fn run_dir(scratch: const u8[:], seed: u64, out: u8[>..]&) {
 }
 
 // One escape case of a worker. Reads the saved input, builds the site
-// and the message, and records the finding.
+// and the message, and records the finding. A child that stopped at
+// its time limit gets the probe when cfg.probe_ms allows it: the
+// parent runs the suspect input again in one child. A clean probe with
+// no abort makes the finding child:slow, and the input was slow and
+// not a hang.
 fn record_escape(rep: Report&, status: i32, code: i32, save_path: const u8[:],
-                 cfg: const Config&, name: const u8[:]) {
+                 cfg: const Config&, name: const u8[:], rundir: const u8[:],
+                 w: i64, seed: u64) {
     var saved: u8[>..] = [];
     read_file(save_path, saved);
+    if status == process::STOPPED && cfg.probe_ms > 0 {
+        // The directory of the probe holds one file, so the child
+        // runs exactly this input.
+        var dir: u8[>..] = [];
+        dir.append(rundir);
+        dir.append("probe-seeds-");
+        format_int(dir, w, 10, 0, ' ');
+        var seed_file: u8[>..] = [];
+        seed_file.append(dir);
+        seed_file.append("/in");
+        var psave: u8[>..] = [];
+        psave.append(rundir);
+        psave.append("probe-save-");
+        format_int(psave, w, 10, 0, ' ');
+        var pstatus: u8[>..] = [];
+        pstatus.append(rundir);
+        pstatus.append("probe-status-");
+        format_int(pstatus, w, 10, 0, ' ');
+        make_dir(dir);
+        write_file(seed_file, saved);
+        var cargs: const u8[:][>..] = [];
+        cargs.push(CHILD_MARKER);
+        cargs.push(dir);
+        var tlen: u8[>..] = [];
+        format_int(tlen, cfg.max_len, 10, 0, ' ');
+        cargs.push(tlen);
+        var tseed: u8[>..] = [];
+        format_int(tseed, seed as i64, 10, 0, ' ');
+        cargs.push(tseed);
+        cargs.push("1");
+        cargs.push(psave);
+        cargs.push(cfg.crash_root);
+        cargs.push(name);
+        // An empty dictionary and a rate of zero, then the path of
+        // the status file, so the probe learns the count of the
+        // aborts.
+        cargs.push("");
+        cargs.push("0");
+        cargs.push(pstatus);
+        var opts = process::options();
+        let c = process::spawn(cfg.child, cargs, opts);
+        if c.status == process::RUNNING {
+            let deadline = clock_ns() + cfg.probe_ms * 1000000;
+            var leftms = (deadline - clock_ns()) / 1000000;
+            if leftms < 1 {
+                leftms = 1;
+            }
+            var pcode: i32 = 0;
+            let st = process::proc_wait(c.id, pcode, leftms as i32);
+            process::proc_free(c.id);
+            if st == process::ENDED && pcode == 0 {
+                var stext: u8[>..] = [];
+                read_file(pstatus, stext);
+                // A clean end with no abort is a slow input. A crash
+                // in the probe saved its crasher, and the finding
+                // keeps the site of the stop.
+                if stext == "0" {
+                    var site: u8[>..] = [];
+                    site.append("child:slow");
+                    var msg: u8[>..] = [];
+                    msg.append("the input ended the probe of the parent");
+                    let at = record(rep, site, msg, saved);
+                    if at >= 0 {
+                        rep.slow += 1;
+                    }
+                    delete_file(seed_file);
+                    delete_file(psave);
+                    delete_file(pstatus);
+                    delete_dir(dir);
+                    return;
+                }
+            }
+        }
+        delete_file(seed_file);
+        delete_file(psave);
+        delete_file(pstatus);
+        delete_dir(dir);
+    }
     var site: u8[>..] = [];
     var msg: u8[>..] = [];
     if status == process::STOPPED {
@@ -254,7 +337,7 @@ fn run_rounds(name: const u8[:], cfg: const Config&, rep: Report&, seed: u64, wo
             if st == process::ENDED && code == CHILD_ERROR {
                 hard = true;
             } else if !(st == process::ENDED && code == 0) {
-                record_escape(rep, st, code, spath, cfg, name);
+                record_escape(rep, st, code, spath, cfg, name, rundir, k, seed);
             }
             process::proc_free(kid_ids[k]);
             done += takes[k];

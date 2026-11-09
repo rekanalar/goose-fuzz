@@ -90,6 +90,41 @@ fn slow_fn(d: const u8[:]) {
     sleep_ms(1);
 }
 
+// A target that sleeps twelve seconds. The child stops it at ten, and
+// the probe of the parent ends it within its own time.
+fn slow12_fn(d: const u8[:]) {
+    if d.len > 0 {
+        sleep_ms(12000);
+    }
+}
+
+// A target that gives the current input a score. The score is the
+// length of the input.
+fn score_fn(d: const u8[:]) {
+    fuzz::score(d.len);
+}
+
+// A target that aborts on an input of eight mark bytes at its end.
+fn mark_fn(d: const u8[:]) {
+    if d.len >= 8 {
+        var all = true;
+        for i in 0..8 {
+            if d[d.len - 8 + i] != 250 {
+                all = false;
+                break;
+            }
+        }
+        if all {
+            assert(false);
+        }
+    }
+}
+
+// A target that refuses an input that is longer than the limit.
+fn len_fn(d: const u8[:]) {
+    assert(d.len <= 4096);
+}
+
 thread_fn always_target() { fuzz::call(always_fn); }
 thread_fn exit_target() { fuzz::call(exit_fn); }
 thread_fn hang_target() { fuzz::call(hang_fn); }
@@ -103,6 +138,10 @@ thread_fn two_target() { fuzz::call(two_fn); }
 thread_fn goose_target() { fuzz::call(goose_fn); }
 thread_fn typed_target() { fuzz::call_typed(typed_fn); }
 thread_fn slow_target() { fuzz::call(slow_fn); }
+thread_fn slow12_target() { fuzz::call(slow12_fn); }
+thread_fn score_target() { fuzz::call(score_fn); }
+thread_fn mark_target() { fuzz::call(mark_fn); }
+thread_fn len_target() { fuzz::call(len_fn); }
 
 fn law_true(d: const u8[:]) -> bool {
     return true;

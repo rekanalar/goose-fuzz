@@ -14,7 +14,7 @@ finding with its message and its source line, and the run goes on.
 Add this to the root file of the program that uses it:
 
 ```goose
-import fuzz from "rekanalar/goose-fuzz@v1.1.0";
+import fuzz from "rekanalar/goose-fuzz@v1.2.0";
 ```
 
 The child mode needs one more package in the same root file:
@@ -33,7 +33,7 @@ hands it to the package. Call `fuzz::run`.
 
 ```goose
 import std;
-import fuzz from "rekanalar/goose-fuzz@v1.1.0";
+import fuzz from "rekanalar/goose-fuzz@v1.2.0";
 
 fn parse(d: const u8[:]) { /* may abort */ }
 
@@ -109,6 +109,11 @@ A `return` from `main` does not set the exit code of a built program. Call
 | `fuzz::child_batch(W)` | The child side. Runs one batch, saves each input before the run. Exit code: 0 clean, 126 error. |
 | `fuzz::run_isolated(name, cfg, rep)` | The parent side. Runs the child in batches. A hang, a crash in C code, a stack overflow or a call to `exit` becomes a finding. |
 | `fuzz::shrink(input, out, W)` | Fill `out` with a shorter input that aborts at the same site. Returns false when `input` does not abort. |
+| `fuzz::shrink_full(input, out, stopped, W)` | As `shrink`. `stopped` holds 1 when the budget of 20000 steps ended the work. The passes remove blocks, zero whole values, then remove single bytes. |
+| `fuzz::run_with(name, cfg, rep, W, M)` | As `run`, with a mutator `M(data, out) -> bool` of the caller. `M` writes an input into `out` and returns true, or returns false to use a kind of the package. |
+| `fuzz::score(v)` | Called by the target. Reports a score for the input that runs. Used when `cfg.score_mode` is 1. |
+| `fuzz::last_score()` | The last score that the target reported. |
+| `fuzz::best_input(rep)` | The input with the best score of the run. Empty without a score mode. |
 | `fuzz::format_report(out, rep)` | Append a text report. |
 | `fuzz::finding_count(rep)` | The number of findings. |
 | `fuzz::finding_site(rep, i)` | The `file:line` of finding `i`. |
@@ -131,6 +136,11 @@ A `return` from `main` does not set the exit code of a built program. Call
 | `workers` | 0 | The child workers that run at once. 0 picks one for each core, capped at 8. The valid range is 1 to 15. |
 | `token_rate` | 25 | The percent of mutations that use a token. |
 | `dict` | empty | The dictionary text, in the libFuzzer format. It holds at most 4096 bytes. |
+| `seed_energy` | 100 | The mutations that a seed gets before the run prefers another seed. A mutation that reaches no new class spends one. 0 turns the spending off. |
+| `pool_order` | 0 | 0 mutates the oldest seed that has energy. 1 mutates the seed with the most hits. |
+| `probe_ms` | 30000 | The time that the parent gives a stopped input in a second child. 0 turns the probe off. |
+| `mutator_rate` | 10 | The percent of mutations that call the mutator of `run_with`. |
+| `score_mode` | 0 | 1 steers by the score of the target. 2 steers by the time of the run. The run then mutates the best input half of the time. |
 
 The run records the seed in `rep.seed`. `format_report` prints it. Pass it
 back as `cfg.seed` to repeat the run. The same seed makes the same inputs on
@@ -270,7 +280,40 @@ bytes can stall a run. The measure of this package used three exact
 bytes. A blind run found the abort on none of eight seeds. The guided
 run found it on seven.
 
-The mutator flips bits and inserts bytes. It has no byte overwrite.
+## Hit-count classes and mutations
+
+The coverage sorts the count of an edge into eight classes. They are
+1, 2, 3, 4-7, 8-15, 16-31, 32-127 and 128 or more. An input is interesting when
+an edge rises above the class of every earlier input. A loop that runs
+more often is then new.
+
+`rep.class_edges[c]` holds the edges whose best class is `c`. Index 0
+holds the edges that no input of the run reached. AFL++ uses a finer
+table of powers of two. This package uses the eight classes of
+libFuzzer.
+
+The mutator has 20 kinds, and `rep.kind_count` counts each one.
+
+- Bit flip, byte insert, byte delete, tail splice and two token kinds.
+- Byte invert, interesting value, add or take one, and add or take an
+  interesting value.
+- Swap, block insert, block delete, byte overwrite and block overwrite.
+- Block copy, block copy to the end and shuffle.
+- A change of a number in the text, and of a binary number.
+ The package wrote each kind from its description. It
+holds no code of AFL++ or libFuzzer.
+
+A seed spends one energy for each mutation that finds nothing new. The
+run prefers the seeds that have energy. A seed at zero stays in the pool.
+When no seed has energy, every seed gets its energy again.
+`rep.seeds_retired` counts the seeds that reached zero.
+
+## A mutator and a score
+
+`fuzz::run_with` takes a mutator of the caller as a second function
+value. The target can call `fuzz::score(v)` to say how close an input is
+to a goal. With `cfg.score_mode = 1` the run mutates the best input half
+of the time. `examples/score.goose` shows both.
 
 ## The child mode
 
@@ -295,8 +338,13 @@ fn main() {
 ```
 
 The parent gives every child a limit of 10 seconds, so a hung child can
-never block the run. The name travels to the child as the last argument,
-so one binary can serve several targets.
+never block the run. The name travels to the child as the seventh
+argument after the marker, so one binary can serve several targets.
+
+When a child stops at the limit, the parent runs the saved input again
+in one new child, within `cfg.probe_ms`. A probe that ends clean with no
+abort makes the finding `child:slow`: the input was slow and not a hang.
+`rep.slow` counts these. A probe that stops again keeps `child:stopped`.
 
 The parent writes its files in a private directory under `TMPDIR`. The
 name holds the seed and the clock, so two runs never share a file.
@@ -316,6 +364,10 @@ slots.
 The package runs the program that a caller names and writes the findings
 into a directory. These protections go beyond the reference libraries.
 
+- The budget of the shrink is 20000 steps. A hostile target cannot keep
+  the shrink alive without end.
+- The probe has its own time limit, `probe_ms`. A hang in the probe ends
+  it, and the finding keeps its site.
 - The child mode stops a child that hangs at the limit of 10 seconds.
   The input becomes a finding, so a hang in the target ends one child and
   not the whole run.
@@ -337,6 +389,9 @@ These risks stay.
   crasher files do. An input may hold a secret of that program.
 - The `cov-cc` script runs the compiler that `GOOSE_COVER_CC` names. A
   caller must name a compiler that it trusts.
+- The probe reruns an input that the child saved. The parent writes it to
+  a file in its private directory and deletes the file after the probe. An
+  input that holds a secret sits on disk for that time.
 - The dictionary file is read as text. A bad line is refused with the line
   number, and no line of it runs as code.
 
@@ -366,9 +421,14 @@ compiler reports this error. Pass such data in the input instead.
 All abort messages of `call_law` share one site, because the abort happens
 inside the package. Run one law for each `run`.
 
-The child takes two optional arguments after the name: the dictionary file
-path and the token rate. A parent that passes only seven arguments keeps
-working with no dictionary.
+The child takes three optional arguments after the name: the dictionary
+file path, the token rate and a status file. The probe uses the status
+file to learn the count of aborts. A parent that passes only seven
+arguments keeps working with no dictionary.
+
+The child mode has no user mutator and no score. Both need the process of
+the parent, and a child is a fresh process. The score travels in a queue
+of the process. A child sets no value for the parent.
 
 The coverage tells how much code a run reached. It names no source line.
 The generated C of the compiler holds no `#line` directive, so a program
@@ -389,8 +449,8 @@ adds a line `edges lost: N`. Guidance still works on the addresses that
 fit, but it cannot see new code behind the lost ones.
 
 The coverage marks an input interesting when it reaches code that no
-earlier input reached. It does not weigh how often an edge ran. The
-coverage flag is `trace-pc`, which gives no record of compared values.
+earlier input reached. It is also interesting when an edge rises to a
+higher class of hits. The coverage flag is `trace-pc`, which gives no record of compared values.
 
 A run reads `fuzz/corpus/<name>` at its start when that directory exists,
 or the directory of `corpus_root`. The files there change the inputs of

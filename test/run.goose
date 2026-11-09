@@ -92,29 +92,42 @@ fn test_exec() {
     }
 }
 
-fn seeds16(pool: u8[>..]&, ends: i64[>..]&) {
+fn seeds16(pool: u8[>..]&, seeds: fuzz::Seed[>..]&) {
     for i in 0..16 {
         pool.push(i as u8);
     }
-    ends.push(16);
+    var s = fuzz::Seed { };
+    s.off = 0;
+    s.len = 16;
+    s.energy = 5;
+    s.hits = 0;
+    seeds.push(s);
 }
 
 fn test_mutate() {
     var pool: u8[>..] = [];
-    var ends: i64[>..] = [];
-    seeds16(pool, ends);
+    var seeds: fuzz::Seed[>..] = [];
+    seeds16(pool, seeds);
     var r = rng { 1 };
-    var seen: i64[4] = [0, 0, 0, 0];
+    var seen: i64[20] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     var out: u8[>..] = [];
-    for i in 0..10000 {
+    var src: i64 = -1;
+    for i in 0..20000 {
         out.clear();
-        let k = fuzz::mutate_next(r, pool, ends, 16, out);
+        let k = fuzz::mutate_next(r, pool, seeds, 16, 0, out, src);
         assert(out.len <= 16);
+        assert(src == 0);
         seen[k] += 1;
     }
+    // The eighteen byte kinds: 0 to 3 and 6 to 19. The kinds 4 and 5
+    // belong to the dictionary path.
     for k in 0..4 {
         assert(seen[k] > 0);
     }
+    for k in 6..20 {
+        assert(seen[k] > 0);
+    }
+    assert(seen[4] == 0 && seen[5] == 0);
     // the same seed gives the same inputs
     var a: u8[>..] = [];
     var b: u8[>..] = [];
@@ -122,40 +135,46 @@ fn test_mutate() {
     var rb = rng { 7 };
     for i in 0..100 {
         out.clear();
-        fuzz::mutate_next(ra, pool, ends, 16, out);
+        fuzz::mutate_next(ra, pool, seeds, 16, 0, out, src);
         a.append(out);
         out.clear();
-        fuzz::mutate_next(rb, pool, ends, 16, out);
+        fuzz::mutate_next(rb, pool, seeds, 16, 0, out, src);
         b.append(out);
     }
     assert(a == b);
     // no seeds: starts from the empty input
-    var none: i64[>..] = [];
+    var empty: fuzz::Seed[>..] = [];
     var nopool: u8[>..] = [];
     for i in 0..100 {
         out.clear();
-        fuzz::mutate_next(ra, nopool, none, 4, out);
+        fuzz::mutate_next(ra, nopool, empty, 4, 0, out, src);
         assert(out.len <= 4);
+        assert(src == -1);
     }
 }
 
 // The first 8 inputs of seed 1, recorded on v2026.3 and equal on v2026.4.
+// The pinned bytes of the first 8 inputs of seed 1. The run fills the
+// value in, and the value stays equal on both compiler versions.
+const MUTATE_TABLE = "";
+
 fn test_mutate_table() {
     var pool: u8[>..] = [];
-    var ends: i64[>..] = [];
-    seeds16(pool, ends);
+    var seeds: fuzz::Seed[>..] = [];
+    seeds16(pool, seeds);
     var r = rng { 1 };
     var out: u8[>..] = [];
     var all: u8[>..] = [];
+    var src: i64 = -1;
     for n in 0..8 {
         out.clear();
-        fuzz::mutate_next(r, pool, ends, 16, out);
+        fuzz::mutate_next(r, pool, seeds, 16, 0, out, src);
         for b in out {
             format_uint(all, b, 16, 2, '0');
         }
         all.push('/');
     }
-    assert(all == "000102030405060708090a0b03040506/000102030405a8060708090a0b0c0d0e/000102030405c0060708090a0b0c0d0e/000102030405060708090a030c0d0e0f/0001020304050607090a0b0c0d0e0f/000102030405060708090a0b0c1d0e0f/000102030405060708090a0b0c0d0e0c/000102030405060708092a0b0c0d0e0f/");
+    assert(all == "000102030405060008090a0b0c0d0e0f/000102030405060708800a0b0c0d0e0f/00060708090a0b0c0d0e010203040506/000102030405060708090a0b0c0d0e0f/000102030405060708090b0c0d0e0f/000102030405060708090af40c0d0e0f/0a0b0c0d0e0f00010203040506070809/000102030405060708090a0b0c0d0e06/");
 }
 
 // A scratch directory under TMPDIR for one test.
@@ -180,15 +199,18 @@ fn test_corpus() {
     assert(write_file(pa, "xy"));
     var pool: u8[>..] = [];
     var ends: i64[>..] = [];
-    assert(fuzz::load_seeds(dir, 4, pool, ends) == 2);
+    var seeds: fuzz::Seed[>..] = [];
+    assert(fuzz::load_seeds(dir, 4, 9, pool, seeds) == 2);
     assert(pool == "xy0123");
-    assert(ends.len == 2 && ends[0] == 2 && ends[1] == 6);
+    assert(seeds.len == 2);
+    assert(seeds[0].off == 0 && seeds[0].len == 2 && seeds[0].energy == 9);
+    assert(seeds[1].off == 2 && seeds[1].len == 4 && seeds[1].energy == 9);
     delete_file(pa);
     delete_file(pb);
     delete_dir(dir);
     var pool2: u8[>..] = [];
-    var ends2: i64[>..] = [];
-    assert(fuzz::load_seeds(dir, 4, pool2, ends2) == -1);
+    var seeds2: fuzz::Seed[>..] = [];
+    assert(fuzz::load_seeds(dir, 4, 9, pool2, seeds2) == -1);
 }
 
 fn test_run() {
@@ -237,7 +259,7 @@ fn test_run() {
     cfg.seed_dir.clear();
     var r7 = fuzz::Report { };
     assert(fuzz::run("assert", cfg, r7, targets::assert_target) == 1);
-    assert(r7.runs == 10000 && fuzz::finding_hits(r7, 0) == 10);
+    assert(r7.runs == 10000 && fuzz::finding_hits(r7, 0) == 31);
     for n in ["always", "assert", "two"] {
         var d: u8[>..] = [];
         d.append(root);
@@ -498,15 +520,15 @@ fn test_coverage_fields() {
 fn main() {
     if fuzz::is_child() {
         // A built binary takes its exit code from exit, not from the
-        // return of main. The name travels as the last argument, so one
-        // binary serves every target of the suite. A parent that holds a
-        // dictionary appends two arguments after the name, so the dict
-        // target runs then.
+        // return of main. The name is the seventh argument after the
+        // marker, so one binary serves every target of the suite. A
+        // parent that holds a dictionary passes a file in the eighth
+        // argument, so the dict target runs then.
         let a = args();
         let mark = fuzz::marker_index();
-        let name = a[a.len - 1];
+        let name = a[mark + 7];
         var code: i32 = 0;
-        if mark >= 0 && a.len >= mark + 9 {
+        if mark >= 0 && a.len >= mark + 9 && a[mark + 8].len > 0 {
             code = fuzz::child_batch(targets::goose_target);
         } else if name == "exit-child" {
             code = fuzz::child_batch(targets::exit_target);
@@ -514,6 +536,8 @@ fn main() {
             code = fuzz::child_batch(targets::hang_target);
         } else if name == "slow-child" {
             code = fuzz::child_batch(targets::slow_target);
+        } else if name == "slow12-child" {
+            code = fuzz::child_batch(targets::slow12_target);
         } else {
             code = fuzz::child_batch(targets::ok_target);
         }
@@ -540,9 +564,183 @@ fn main() {
     test_typed();
     test_parallel();
     test_speedup();
+    test_pool();
+    test_score();
+    test_run_with();
+    test_probe();
     test_child();
     print("ok hash, site, report, exec, mutate, child, dict, reader, typed, parallel");
     return 0;
+}
+
+// The pool: a seed that finds nothing loses its energy and leaves it.
+// The order that takes the best seed first runs clean too.
+fn test_pool() {
+    var root: u8[>..] = [];
+    env("TMPDIR", root);
+    root.append("/fz-pool-root");
+    clean_dir(root);
+    make_dir(root);
+    var dir: u8[>..] = [];
+    dir.append(root);
+    dir.append("/seeds");
+    make_dir(dir);
+    var pa: u8[>..] = [];
+    pa.append(dir);
+    pa.append("/a");
+    var pb: u8[>..] = [];
+    pb.append(dir);
+    pb.append("/b");
+    assert(write_file(pa, "xx"));
+    assert(write_file(pb, "yy"));
+
+    var cfg = fuzz::config();
+    cfg.crash_root.append(root);
+    cfg.seed = 5;
+    cfg.runs = 300;
+    cfg.seed_energy = 5;
+    cfg.seed_dir.append(dir);
+    var rep = fuzz::Report { };
+    assert(fuzz::run("ok", cfg, rep, targets::ok_target) == 0);
+    assert(rep.runs == 300);
+    assert(rep.seeds_retired >= 2);
+
+    var cfg2 = fuzz::config();
+    cfg2.crash_root.append(root);
+    cfg2.seed = 6;
+    cfg2.runs = 100;
+    cfg2.pool_order = 1;
+    cfg2.seed_dir.append(dir);
+    var rep2 = fuzz::Report { };
+    assert(fuzz::run("ok", cfg2, rep2, targets::ok_target) == 0);
+    assert(rep2.runs == 100);
+
+    clean_dir(root);
+    delete_dir(root);
+}
+
+// The score of the target steers the run, and the time of the run does
+// too.
+fn test_score() {
+    var root: u8[>..] = [];
+    env("TMPDIR", root);
+    root.append("/fz-score-root");
+    clean_dir(root);
+    make_dir(root);
+    var cfg = fuzz::config();
+    cfg.crash_root.append(root);
+    cfg.seed = 3;
+    cfg.runs = 200;
+    cfg.score_mode = 1;
+    var rep = fuzz::Report { };
+    assert(fuzz::run("ok", cfg, rep, targets::score_target) == 0);
+    assert(rep.best_score > 0.0);
+    assert(fuzz::best_input(rep).len == rep.best_score as i64);
+    cfg.score_mode = 2;
+    cfg.runs = 50;
+    var rep2 = fuzz::Report { };
+    assert(fuzz::run("ok", cfg, rep2, targets::ok_target) == 0);
+    assert(rep2.best_score > 0.0);
+    // With the mode off, a scoring target leaves no score and no queue.
+    cfg.score_mode = 0;
+    cfg.runs = 20;
+    var rep3 = fuzz::Report { };
+    assert(fuzz::run("ok", cfg, rep3, targets::score_target) == 0);
+    assert(rep3.best_score == 0.0 && fuzz::best_input(rep3).len == 0);
+    assert(fuzz::poll_score() == 0.0);
+    clean_dir(root);
+    delete_dir(root);
+}
+
+// The mutator of the caller. A mutator that writes finds the mark, a
+// mutator that refuses falls back to the kinds of the table, and a long
+// input is cut to the limit.
+fn mark_mutator(data: const u8[:], out: u8[>..]&) -> bool {
+    out.append(data);
+    for i in 0..8 {
+        out.push(250);
+    }
+    return true;
+}
+
+fn idle_mutator(data: const u8[:], out: u8[>..]&) -> bool {
+    if data.len > 0 {
+        return false;
+    }
+    return false;
+}
+
+fn long_mutator(data: const u8[:], out: u8[>..]&) -> bool {
+    for i in 0..5000 {
+        out.push(65);
+    }
+    return true;
+}
+
+fn test_run_with() {
+    var root: u8[>..] = [];
+    env("TMPDIR", root);
+    root.append("/fz-with-root");
+    clean_dir(root);
+    var cfg = fuzz::config();
+    cfg.crash_root.append(root);
+    cfg.seed = 11;
+    cfg.runs = 300;
+    cfg.mutator_rate = 100;
+    var rep = fuzz::Report { };
+    assert(fuzz::run_with("mark", cfg, rep, targets::mark_target, mark_mutator) == 1);
+    // The kinds of the table hold no count: the mutator made every
+    // input.
+    var sum: i64 = 0;
+    for k in 0..20 {
+        sum += rep.kind_count[k];
+    }
+    assert(sum == 0);
+
+    var cfg2 = fuzz::config();
+    cfg2.crash_root.append(root);
+    cfg2.seed = 12;
+    cfg2.runs = 100;
+    cfg2.mutator_rate = 100;
+    var rep2 = fuzz::Report { };
+    assert(fuzz::run_with("ok", cfg2, rep2, targets::ok_target, idle_mutator) == 0);
+    var sum2: i64 = 0;
+    for k in 0..20 {
+        sum2 += rep2.kind_count[k];
+    }
+    assert(sum2 > 0);
+
+    var cfg3 = fuzz::config();
+    cfg3.crash_root.append(root);
+    cfg3.seed = 13;
+    cfg3.runs = 50;
+    cfg3.mutator_rate = 100;
+    var rep3 = fuzz::Report { };
+    assert(fuzz::run_with("len", cfg3, rep3, targets::len_target, long_mutator) == 0);
+
+    clean_dir(root);
+    delete_dir(root);
+}
+
+// The probe of the parent. A slow input ends the probe, and a hang
+// stops the probe again.
+fn test_probe() {
+    let prog = args()[0];
+    var root: u8[>..] = [];
+    env("TMPDIR", root);
+    root.append("/fz-probe-root");
+    clean_dir(root);
+    var cfg = fuzz::config();
+    cfg.crash_root.append(root);
+    cfg.child.append(prog);
+    cfg.seed = 8;
+    cfg.runs = 100;
+    var rep = fuzz::Report { };
+    assert(fuzz::run_isolated("slow12-child", cfg, rep) == 1);
+    assert(fuzz::finding_site(rep, 0) == "child:slow");
+    assert(rep.slow >= 1 && rep.slow == fuzz::finding_hits(rep, 0));
+    clean_dir(root);
+    delete_dir(root);
 }
 
 // The child mode: the exit case, the hang case, the clean batch, the
@@ -592,10 +790,12 @@ fn test_child() {
     assert(names.len > 0);
 
     // The hang case. The child sleeps 30 seconds, the parent stops it at
-    // the limit.
+    // the limit. The probe of two seconds stops again, so the finding
+    // keeps the site of the stop.
     var mark2: u8[>..] = [];
     mark2.push(62);
     assert(write_file(sp, mark2));
+    cfg.probe_ms = 2000;
     var rep2 = fuzz::Report { };
     assert(fuzz::run_isolated("hang-child", cfg, rep2) == 1);
     assert(rep2.runs == 100);
@@ -664,10 +864,10 @@ fn test_dict() {
     var dends: i64[>..] = [];
     assert(fuzz::dict_parse(cfg.dict, dpool, dends, err) == 4);
     assert(dends.len == 4);
-    assert(fuzz::seed_at(dpool, dends, 0, 64) == "GOOSE");
-    assert(fuzz::seed_at(dpool, dends, 1, 64) == "A\\z");
-    assert(fuzz::seed_at(dpool, dends, 2, 64) == "q\"i");
-    let tok3 = fuzz::seed_at(dpool, dends, 3, 64);
+    assert(fuzz::dict_at(dpool, dends, 0) == "GOOSE");
+    assert(fuzz::dict_at(dpool, dends, 1) == "A\\z");
+    assert(fuzz::dict_at(dpool, dends, 2) == "q\"i");
+    let tok3 = fuzz::dict_at(dpool, dends, 3);
     assert(tok3.len == 2 && tok3[0] == 0 && tok3[1] == 255);
     // a bad line fails the load and names the line
     var bad: u8[>..] = [];
@@ -708,8 +908,8 @@ fn test_dict() {
     assert(!fuzz::dict_add(cfg4, big));
     // reproducibility with a dictionary: the same seed makes the same inputs
     var pool: u8[>..] = [];
-    var ends: i64[>..] = [];
-    seeds16(pool, ends);
+    var seeds: fuzz::Seed[>..] = [];
+    seeds16(pool, seeds);
     var dpool2: u8[>..] = [];
     var dends2: i64[>..] = [];
     var derr2: u8[>..] = [];
@@ -719,12 +919,13 @@ fn test_dict() {
     var out: u8[>..] = [];
     var ra = rng { 7 };
     var rb = rng { 7 };
+    var src: i64 = -1;
     for i in 0..500 {
         out.clear();
-        fuzz::mutate_next_dict(ra, pool, ends, 16, dpool2, dends2, 25, out);
+        fuzz::mutate_next_dict(ra, pool, seeds, 16, 0, dpool2, dends2, 25, out, src);
         a.append(out);
         out.clear();
-        fuzz::mutate_next_dict(rb, pool, ends, 16, dpool2, dends2, 25, out);
+        fuzz::mutate_next_dict(rb, pool, seeds, 16, 0, dpool2, dends2, 25, out, src);
         b.append(out);
     }
     assert(a == b);
@@ -737,10 +938,10 @@ fn test_dict() {
     var rb2 = rng { 3 };
     for i in 0..1000 {
         out.clear();
-        fuzz::mutate_next_dict(ra2, pool, ends, 16, none, noends, 25, out);
+        fuzz::mutate_next_dict(ra2, pool, seeds, 16, 0, none, noends, 25, out, src);
         a2.append(out);
         out.clear();
-        fuzz::mutate_next(rb2, pool, ends, 16, out);
+        fuzz::mutate_next(rb2, pool, seeds, 16, 0, out, src);
         b2.append(out);
     }
     assert(a2 == b2);
@@ -749,7 +950,7 @@ fn test_dict() {
     var rc = rng { 11 };
     for i in 0..2000 {
         out.clear();
-        let k = fuzz::mutate_next_dict(rc, pool, ends, 16, dpool2, dends2, 100, out);
+        let k = fuzz::mutate_next_dict(rc, pool, seeds, 16, 0, dpool2, dends2, 100, out, src);
         assert(out.len <= 16);
         if k >= 4 {
             hits += 1;
@@ -766,7 +967,7 @@ fn test_dict() {
     var rl = rng { 5 };
     for i in 0..500 {
         out.clear();
-        let k = fuzz::mutate_next_dict(rl, pool, ends, 16, long_dpool, long_dends, 100, out);
+        let k = fuzz::mutate_next_dict(rl, pool, seeds, 16, 0, long_dpool, long_dends, 100, out, src);
         assert(out.len <= 16);
         if k == 5 {
             // an overwrite always shows a token byte; the seeds hold only 0 to 15
@@ -792,7 +993,7 @@ fn test_dict() {
     var rn = rng { 13 };
     for i in 0..500 {
         out.clear();
-        fuzz::mutate_next_dict(rn, pool, ends, 16, nul_pool, nul_ends, 100, out);
+        fuzz::mutate_next_dict(rn, pool, seeds, 16, 0, nul_pool, nul_ends, 100, out, src);
         if find(out, "\x00Z") >= 0 {
             nul_seen = true;
         }

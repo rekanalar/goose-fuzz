@@ -1,8 +1,6 @@
 // The settings of one fuzz run.
 namespace fuzz;
 
-import std;
-
 struct Config {
     // 0 picks a fresh seed from random_seed(). Any other value repeats a run.
     seed: u64 = 0,
@@ -30,6 +28,25 @@ struct Config {
     // The dictionary text, in the libFuzzer format. Empty means no
     // dictionary. It holds at most 4096 bytes.
     dict: u8[..4096] = [],
+    // The mutations that a seed of the pool may still get. A mutation
+    // that reaches no new class spends one. The choice prefers the seeds
+    // that have energy, and every seed gets its energy again when none
+    // has any. 0 turns the spending off.
+    seed_energy: i64 = 100,
+    // The order of the pool. 0 takes the oldest seed first. 1 takes
+    // the seed with the most new classes first.
+    pool_order: i64 = 0,
+    // The time of the probe of a stopped child, in milliseconds. The
+    // probe runs the suspect input again in one child. 0 turns the
+    // probe off, and every stop stays a hang.
+    probe_ms: i64 = 30000,
+    // The percent of the mutations that call the mutator of the
+    // caller. 0 never calls it.
+    mutator_rate: i64 = 10,
+    // The score that steers the run. 0 uses the coverage only. 1 keeps
+    // the input with the highest score of the target. 2 keeps the
+    // slowest input, and the score is the time of the run.
+    score_mode: i64 = 0,
 }
 
 fn config() -> Config {

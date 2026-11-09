@@ -8,10 +8,10 @@ import os;
 // past the cap.
 const CORPUS_MAX = 4096;
 
-// Read every file of dir, in name order, into pool. ends[i] is the end
-// offset of file i. A file is cut to max_len. Returns the number of files,
-// or -1 when dir cannot be listed.
-fn load_seeds(dir: const u8[:], max_len: i64, pool: u8[>..]&, ends: i64[>..]&) -> i64 {
+// Read every file of dir, in name order, into pool. One Seed struct per
+// file holds the offset, the length and the energy. A file is cut to
+// max_len. Returns the number of files, or -1 when dir cannot be listed.
+fn load_seeds(dir: const u8[:], max_len: i64, energy: i64, pool: u8[>..]&, seeds: Seed[>..]&) -> i64 {
     var names: u8[>..] = [];
     if !list_dir(dir, names) {
         return -1;
@@ -34,7 +34,12 @@ fn load_seeds(dir: const u8[:], max_len: i64, pool: u8[>..]&, ends: i64[>..]&) -
                     data.resize(max_len);
                 }
                 pool.append(data);
-                ends.push(pool.len);
+                var s = Seed { };
+                s.off = pool.len - data.len;
+                s.len = data.len;
+                s.energy = energy;
+                s.hits = 0;
+                seeds.push(s);
                 n += 1;
             }
         }
@@ -70,13 +75,14 @@ fn corpus_dir(root: const u8[:], name: const u8[:], out: u8[>..]&) {
 // The files of the corpus directory of name, into pool. A directory that
 // does not exist holds no files and is not an error. Returns the count
 // of the files.
-fn load_corpus(root: const u8[:], name: const u8[:], max_len: i64, pool: u8[>..]&, ends: i64[>..]&) -> i64 {
+fn load_corpus(root: const u8[:], name: const u8[:], max_len: i64, energy: i64,
+               pool: u8[>..]&, seeds: Seed[>..]&) -> i64 {
     var dir: u8[>..] = [];
     corpus_dir(root, name, dir);
     if !is_dir(dir) {
         return 0;
     }
-    let n = load_seeds(dir, max_len, pool, ends);
+    let n = load_seeds(dir, max_len, energy, pool, seeds);
     if n < 0 {
         return 0;
     }

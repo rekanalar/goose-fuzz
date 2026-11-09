@@ -43,6 +43,20 @@ fn staged(d: const u8[:]) {
 
 thread_fn staged_target() { fuzz::call(staged); }
 
+// A loop whose body runs 200 times for one input, so its edge reaches the
+// highest hit-count class.
+fn loopy(d: const u8[:]) {
+    var sum: i64 = 0;
+    for i in 0..200 {
+        sum += i;
+    }
+    if sum < 0 {
+        abort("unreachable");
+    }
+}
+
+thread_fn loopy_target() { fuzz::call(loopy); }
+
 fn scratch(name: const u8[:], out: u8[>..]&) {
     env("TMPDIR", out);
     out.append("/");
@@ -97,8 +111,8 @@ fn count_files(dir: const u8[:]) -> i64 {
 // Remove the directories that the test makes, deepest first. clean_dir
 // takes the files of one directory only.
 fn wipe(root: const u8[:]) {
-    let subs: const u8[:][18] = ["/seeds", "/corpus/cov", "/corpus", "/corpus2/det", "/corpus2",
-        "/corpus3/same", "/corpus3", "/corpus4/staged", "/corpus4", "/corpus5/cap", "/corpus5", "/crashers/cov", "/crashers/det",
+    let subs: const u8[:][21] = ["/seeds", "/corpus/cov", "/corpus", "/corpus2/det", "/corpus2",
+        "/corpus3/same", "/corpus3", "/corpus4/staged", "/corpus4", "/corpus5/cap", "/corpus5", "/corpus6/loopy", "/corpus6", "/crashers/loopy", "/crashers/cov", "/crashers/det",
         "/crashers/same", "/crashers/staged", "/crashers/cap", "/crashers", ""];
     for s in subs {
         var path: u8[>..] = [];
@@ -245,8 +259,29 @@ fn main() {
         assert(fuzz::run("cap", cfg5, rep5, branch_target) == 0);
         assert(rep5.corpus_dropped > 0);
         assert(count_files(capdir) == 4096);
+
+        // The classes. The loop edge runs 200 times, so the class 8 holds
+        // an edge. The classes 1 to 8 and the rest sum to the edges.
+        var cfg6 = fuzz::config();
+        cfg6.seed = 3;
+        cfg6.runs = 5;
+        cfg6.corpus_root.append(root);
+        cfg6.corpus_root.append("/corpus6");
+        cfg6.crash_root.append(root);
+        cfg6.crash_root.append("/crashers");
+        var rep6 = fuzz::Report { };
+        assert(fuzz::run("loopy", cfg6, rep6, loopy_target) == 0);
+        assert(rep6.class_edges[8] >= 1);
+        var total: i64 = 0;
+        for c in 0..9 {
+            assert(rep6.class_edges[c] >= 0);
+            total += rep6.class_edges[c];
+        }
+        assert(total == rep6.edges);
+        assert(rep6.class_edges[0] == rep6.edges - (total - rep6.class_edges[0]));
     } else {
         print("off");
+        assert(rep.class_edges[8] == 0);
         // A build without the coverage flag behaves as before.
         assert(rep.edges == 0);
         assert(rep.interesting == 0);

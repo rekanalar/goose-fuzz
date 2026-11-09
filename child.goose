@@ -44,14 +44,16 @@ fn arg_int(a: u8[:][>..]&, k: i64, out: i64&) -> bool {
     return true;
 }
 
-// The child side. Reads the seven arguments after the marker, in the
-// order seed_dir, max_len, seed, runs, saved path, crash root, name. A
-// parent that holds a dictionary appends the dictionary path and the
-// token rate as an eighth and a ninth argument. Seven arguments still
-// mean no dictionary, so an old parent keeps working. Loads the seeds,
-// runs the batch, and writes each input to the saved path before the
-// run. A contained abort saves a crasher, like run does. Returns 0 for
-// a clean batch, 126 for a child-side error.
+// The child side. Reads the arguments after the marker, in the order
+// seed_dir, max_len, seed, runs, saved path, crash root, name. A parent
+// that holds a dictionary appends the dictionary path and the token
+// rate as an eighth and a ninth argument. Seven arguments still mean no
+// dictionary, so an old parent keeps working. A tenth argument is the
+// path of a status file: the child writes the count of its aborts
+// there, and the probe of the parent reads it. Loads the seeds, runs
+// the batch, and writes each input to the saved path before the run. A
+// contained abort saves a crasher, like run does. Returns 0 for a clean
+// batch, 126 for a child-side error.
 fn child_batch<W>() -> i32 {
     let a = args();
     let mark = marker_index();
@@ -93,30 +95,44 @@ fn child_batch<W>() -> i32 {
             arg_int(a, mark + 9, rate);
         }
     }
+    // The status path is the tenth argument. The probe of the parent
+    // reads the count of the aborts from it.
+    var status_path: u8[>..] = [];
+    if mark + 10 < a.len {
+        status_path.append(a[mark + 10]);
+    }
     var pool: u8[>..] = [];
-    var ends: i64[>..] = [];
+    var seeds: Seed[>..] = [];
     if seed_dir.len > 0 {
-        if load_seeds(seed_dir, max_len, pool, ends) < 0 {
+        if load_seeds(seed_dir, max_len, DEFAULT_ENERGY, pool, seeds) < 0 {
             return CHILD_ERROR;
         }
     }
-    let first = max(ends.len, 1);
+    let first = max(seeds.len, 1);
     var r = rng { seed_n as u64 };
     var cur: u8[>..] = [];
     var why: u8[>..] = [];
+    var src: i64 = -1;
+    var aborts: i64 = 0;
     for i in 0..runs {
         cur.clear();
-        if i < ends.len {
-            cur.append(seed_at(pool, ends, i, max_len));
+        if i < seeds.len {
+            cur.append(seed_at(pool, seeds, i, max_len));
         } else if i >= first {
-            mutate_next_dict(r, pool, ends, max_len, dpool, dends, rate, cur);
+            mutate_next_dict(r, pool, seeds, max_len, 0, dpool, dends, rate, cur, src);
         }
         // The input reaches the file before the run. A death then leaves
         // the input that caused it.
         write_file(save_path, cur);
         if !run_one(cur, why, W) {
             save_crasher(crash_root, name, cur);
+            aborts += 1;
         }
+    }
+    if status_path.len > 0 {
+        var line: u8[>..] = [];
+        format_int(line, aborts, 10, 0, ' ');
+        write_file(status_path, line);
     }
     return 0;
 }

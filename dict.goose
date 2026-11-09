@@ -170,3 +170,13 @@ fn dict_load(cfg: Config&, path: const u8[:], err: u8[>..]&) -> bool {
     cfg.dict.append(text);
     return true;
 }
+
+// The bytes of token i of the pool. The tokens sit in the pool one
+// after the other, and ends holds the end of each one.
+fn dict_at(dpool: const u8[:], dends: const i64[:], i: i64) -> const u8[:] {
+    var start: i64 = 0;
+    if i > 0 {
+        start = dends[i - 1];
+    }
+    return dpool[start..dends[i]];
+}
