@@ -58,6 +58,16 @@ static uint64_t gs_cov_classes[9];
 // outside a bracket, and its addresses never rise.
 static int gs_cov_active = 0;
 
+// True on the thread that opened the bracket. Only that thread records
+// edges. The main thread waits for the worker in a loop of its own, and
+// the counts of that loop would change with the speed of the machine.
+// The flag lives in the thread, so it needs no lock.
+#if defined(__GNUC__) || defined(__clang__)
+static __thread int gs_cov_mine = 0;
+#else
+static int gs_cov_mine = 0;
+#endif
+
 // True when a callback came. It says that the program has the coverage.
 static int gs_cov_here = 0;
 
@@ -97,7 +107,8 @@ static uint8_t gs_cov_class_of(uint32_t n) {
 // compiles no callback. A program built with MSVC has no coverage.
 #if defined(__GNUC__) || defined(__clang__)
 GS_COV_CLEAN void __sanitizer_cov_trace_pc(void) {
-    if (gs_cov_busy) return;
+    gs_cov_here = 1;
+    if (!gs_cov_mine || gs_cov_busy) return;
     gs_cov_busy = 1;
     uintptr_t addr = (uintptr_t)__builtin_return_address(0);
     uint32_t at = (uint32_t)((addr >> 4) * 2654435761u) & (GS_COV_SLOTS - 1u);
@@ -118,7 +129,6 @@ GS_COV_CLEAN void __sanitizer_cov_trace_pc(void) {
         }
         i++;
     }
-    gs_cov_here = 1;
     if (!placed) {
         gs_cov_lost++;
     } else if (gs_cov_seen[slot] != gs_cov_epoch) {
@@ -160,6 +170,7 @@ GS_COV_CLEAN void gs_cov_begin(void) {
     gs_cov_epoch++;
     gs_cov_ntouched = 0;
     gs_cov_active = 1;
+    gs_cov_mine = 1;
 }
 
 // Close the bracket of one input. It gives the count of the edges
@@ -185,6 +196,7 @@ GS_COV_CLEAN uint64_t gs_cov_end(void) {
         gs_cov_rises_last = rises;
         gs_cov_active = 0;
     }
+    gs_cov_mine = 0;
     return gs_cov_rises_last;
 }
 

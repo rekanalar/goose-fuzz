@@ -287,6 +287,10 @@ The coverage sorts the count of an edge into eight classes. They are
 an edge rises above the class of every earlier input. A loop that runs
 more often is then new.
 
+Only the thread of the target records edges. The wait loop of the main
+thread would otherwise add counts that change with the speed of the
+machine.
+
 `rep.class_edges[c]` holds the edges whose best class is `c`. Index 0
 holds the edges that no input of the run reached. AFL++ uses a finer
 table of powers of two. This package uses the eight classes of
