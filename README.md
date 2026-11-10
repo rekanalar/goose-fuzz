@@ -163,6 +163,21 @@ finding in `rep`. The files that passed are `rep.runs` minus that number.
 A save can fail. The finding stays in the report, its `saved` field is false
 and `rep.save_failed` counts it.
 
+## The verdict of a gate
+
+A gate needs one line and one exit code. The `examples/verdict.goose` program shows the pattern. It runs a target and prints the verdict. It exits with code 1 when the run found something.
+
+```
+goose build --debug examples/verdict.goose -o verdict && ./verdict
+verdict: PASS, 2000 run(s), 0 finding(s)
+```
+
+A test suite needs the same result as a test result. The goose-testkit package holds the helper that records it. The number of findings, the number of runs and the text of the report go to it.
+
+```goose
+testkit::fuzz_result(t, found, rep.runs, report);
+```
+
 ## A dictionary
 
 A parser fuzzer needs the words of the protocol. Blind byte flips rarely
