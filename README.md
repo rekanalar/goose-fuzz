@@ -86,48 +86,48 @@ A `return` from `main` does not set the exit code of a built program. Call
 
 | Function | Purpose |
 |---|---|
-| `fuzz::call(F)` | Call in the target `thread_fn`. Takes the input and calls `F` on it. |
-| `fuzz::call_law(F)` | As `call`, for `F(d) -> bool`. A false result aborts with `law failed`. |
-| `fuzz::call_typed(F)` | As `call`, for a typed target. `F` takes the `Reader` over the input. |
-| `fuzz::dict_add(cfg, token)` | Append one token to `cfg.dict` as an escaped line. False when the buffer is full or the token is empty. |
-| `fuzz::dict_load(cfg, path, err)` | Read a dictionary file in the libFuzzer format and append its text to `cfg.dict`. False on a bad line, with `line N:` in `err`. |
-| `fuzz::dict_parse(text, dpool, dends, err)` | Parse dictionary text into a token pool. Returns the count, or -1 with `line N:` in `err`. |
-| `fuzz::reader(data)` | Build a `Reader` over the bytes. |
-| `fuzz::read_bool(r)` | One byte as a `bool`. |
-| `fuzz::read_i64(r, lo, hi)` | Eight bytes into `[lo, hi]`. Refuses `lo > hi` with 0. |
-| `fuzz::read_string(r, max_len)` | Up to `max_len` bytes. |
-| `fuzz::read_i64_list(r, max_items)` | One count byte, then 8 bytes per item. |
-| `fuzz::cov_live()` | True when the program was built with the coverage compiler. |
-| `fuzz::cov_reset()` | Empty the tables of the coverage and turn the lock off. |
-| `fuzz::cov_begin()` | Open the bracket and start recording on the calling thread. |
-| `fuzz::cov_attach()` | Start recording on the calling thread. The bracket stays as it is. A worker calls it. |
-| `fuzz::cov_detach()` | Stop recording on the calling thread. Its edges stay in the bracket. |
-| `fuzz::cov_end()` | Close the bracket. Gives the count of edges whose class rose. |
-| `fuzz::cov_total()` | The distinct edges since the last reset. |
-| `fuzz::cov_lost()` | The addresses that found the table full. |
-| `fuzz::cov_class_edges(c)` | The edges whose best class is `c`, from 1 to 8. |
-| `fuzz::coverage_path(out)` | Write the path of the `cov-cc` script of the installed package into `out`. False when the path has an unexpected form. |
-| `fuzz::cores()` | One worker for each core, probed from the system. |
-| `fuzz::derive_seed(seed, batch, worker)` | The seed of one batch of one worker. |
-| `fuzz::config()` | A `Config` with the defaults. |
-| `fuzz::run(name, cfg, rep, W)` | Fuzz the worker `W`. Fills `rep`. Returns the finding count, or -1 when the seed directory cannot be read. |
-| `fuzz::replay(name, crash_root, rep, W)` | Run every saved crasher once. Returns the number that aborted. Passed files: `rep.runs` minus that. |
-| `fuzz::run_one(input, why, W)` | Run one input. Returns false and fills `why` when it aborts. |
-| `fuzz::is_child()` | True when the program was started as a child of the parent mode. |
-| `fuzz::child_batch(W)` | The child side. Runs one batch, saves each input before the run. Exit code: 0 clean, 126 error. |
-| `fuzz::run_isolated(name, cfg, rep)` | The parent side. Runs the child in batches. A hang, a crash in C code, a stack overflow or a call to `exit` becomes a finding. |
-| `fuzz::shrink(input, out, W)` | Fill `out` with a shorter input that aborts at the same site. Returns false when `input` does not abort. |
-| `fuzz::shrink_full(input, out, stopped, W)` | As `shrink`. `stopped` holds 1 when the budget of 20000 steps ended the work. The passes remove blocks, zero whole values, then remove single bytes. |
-| `fuzz::run_with(name, cfg, rep, W, M)` | As `run`, with a mutator `M(data, out) -> bool` of the caller. `M` writes an input into `out` and returns true, or returns false to use a kind of the package. |
-| `fuzz::score(v)` | Called by the target. Reports a score for the input that runs. Used when `cfg.score_mode` is 1. |
-| `fuzz::last_score()` | The last score that the target reported. |
-| `fuzz::best_input(rep)` | The input with the best score of the run. Empty without a score mode. |
-| `fuzz::format_report(out, rep)` | Append a text report. |
-| `fuzz::finding_count(rep)` | The number of findings. |
-| `fuzz::finding_site(rep, i)` | The `file:line` of finding `i`. |
-| `fuzz::finding_message(rep, i)` | The first abort message at that site. |
-| `fuzz::finding_input(rep, i)` | The first input that reached that site. |
-| `fuzz::finding_hits(rep, i)` | The number of runs that reached that site. |
+| `call(F)` | Call in the target `thread_fn`. Takes the input and calls `F` on it. |
+| `call_law(F)` | As `call`, for `F(d) -> bool`. A false result aborts with `law failed`. |
+| `call_typed(F)` | As `call`, for a typed target. `F` takes the `Reader` over the input. |
+| `dict_add(cfg, token)` | Append one token to `cfg.dict` as an escaped line. False when the buffer is full or the token is empty. |
+| `dict_load(cfg, path, err)` | Read a dictionary file in the libFuzzer format and append its text to `cfg.dict`. False on a bad line, with `line N:` in `err`. |
+| `dict_parse(text, dpool, dends, err)` | Parse dictionary text into a token pool. Returns the count, or -1 with `line N:` in `err`. |
+| `reader(data)` | Build a `Reader` over the bytes. |
+| `read_bool(r)` | One byte as a `bool`. |
+| `read_i64(r, lo, hi)` | Eight bytes into `[lo, hi]`. Refuses `lo > hi` with 0. |
+| `read_string(r, max_len)` | Up to `max_len` bytes. |
+| `read_i64_list(r, max_items)` | One count byte, then 8 bytes per item. |
+| `cov_live()` | True when the program was built with the coverage compiler. |
+| `cov_reset()` | Empty the tables of the coverage and turn the lock off. |
+| `cov_begin()` | Open the bracket and start recording on the calling thread. |
+| `cov_attach()` | Start recording on the calling thread. The bracket stays as it is. A worker calls it. |
+| `cov_detach()` | Stop recording on the calling thread. Its edges stay in the bracket. |
+| `cov_end()` | Close the bracket. Gives the count of edges whose class rose. |
+| `cov_total()` | The distinct edges since the last reset. |
+| `cov_lost()` | The addresses that found the table full. |
+| `cov_class_edges(c)` | The edges whose best class is `c`, from 1 to 8. |
+| `coverage_path(out)` | Write the path of the `cov-cc` script of the installed package into `out`. False when the path has an unexpected form. |
+| `cores()` | One worker for each core, probed from the system. |
+| `derive_seed(seed, batch, worker)` | The seed of one batch of one worker. |
+| `config()` | A `Config` with the defaults. |
+| `run(name, cfg, rep, W)` | Fuzz the worker `W`. Fills `rep`. Returns the finding count, or -1 when the seed directory cannot be read. |
+| `replay(name, crash_root, rep, W)` | Run every saved crasher once. Returns the number that aborted. Passed files: `rep.runs` minus that. |
+| `run_one(input, why, W)` | Run one input. Returns false and fills `why` when it aborts. |
+| `is_child()` | True when the program was started as a child of the parent mode. |
+| `child_batch(W)` | The child side. Runs one batch, saves each input before the run. Exit code: 0 clean, 126 error. |
+| `run_isolated(name, cfg, rep)` | The parent side. Runs the child in batches. A hang, a crash in C code, a stack overflow or a call to `exit` becomes a finding. |
+| `shrink(input, out, W)` | Fill `out` with a shorter input that aborts at the same site. Returns false when `input` does not abort. |
+| `shrink_full(input, out, stopped, W)` | As `shrink`. `stopped` holds 1 when the budget of 20000 steps ended the work. The passes remove blocks, zero whole values, then remove single bytes. |
+| `run_with(name, cfg, rep, W, M)` | As `run`, with a mutator `M(data, out) -> bool` of the caller. `M` writes an input into `out` and returns true, or returns false to use a kind of the package. |
+| `score(v)` | Called by the target. Reports a score for the input that runs. Used when `cfg.score_mode` is 1. |
+| `last_score()` | The last score that the target reported. |
+| `best_input(rep)` | The input with the best score of the run. Empty without a score mode. |
+| `format_report(out, rep)` | Append a text report. |
+| `finding_count(rep)` | The number of findings. |
+| `finding_site(rep, i)` | The `file:line` of finding `i`. |
+| `finding_message(rep, i)` | The first abort message at that site. |
+| `finding_input(rep, i)` | The first input that reached that site. |
+| `finding_hits(rep, i)` | The number of runs that reached that site. |
 
 ### Config
 
