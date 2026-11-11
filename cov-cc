@@ -11,8 +11,8 @@
 # Set GOOSE_COVER_CC to name another one. The script fails when the
 # machine has no C compiler.
 #
-# The flag costs about six times the run time of the target. Build the
-# program without the wrapper for a plain run.
+# The flag costs several times the run time of the target. The README
+# gives a measure. Build the program without the wrapper for a plain run.
 
 real=""
 for candidate in "$GOOSE_COVER_CC" clang gcc cc; do

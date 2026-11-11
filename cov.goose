@@ -14,6 +14,8 @@ namespace fuzz;
 
 extern fn gs_cov_reset();
 extern fn gs_cov_begin();
+extern fn gs_cov_attach();
+extern fn gs_cov_detach();
 extern fn gs_cov_end() -> u64;
 extern fn gs_cov_total_edges() -> u64;
 extern fn gs_cov_lost_edges() -> u64;
@@ -30,6 +32,21 @@ fn cov_reset() {
 // Open the bracket of one input.
 fn cov_begin() {
     gs_cov_begin();
+}
+
+// Start the recording on the calling thread. The bracket stays as it
+// is. The thread that owns the bracket opens it with cov_begin. Each
+// worker then calls cov_attach at its start and cov_detach at its end,
+// and the owner closes the bracket after it joined the workers. The
+// edges of all the attached threads join one bracket.
+fn cov_attach() {
+    gs_cov_attach();
+}
+
+// Stop the recording on the calling thread. Its edges stay in the
+// bracket.
+fn cov_detach() {
+    gs_cov_detach();
 }
 
 // Close the bracket of one input. It gives the count of the edges

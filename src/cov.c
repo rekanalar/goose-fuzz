@@ -22,8 +22,10 @@
 // The table of the addresses. The address 0 means that the slot is free.
 static uintptr_t gs_cov_table[GS_COV_SLOTS];
 
-// The hits of the current input, one counter per slot.
-static uint32_t gs_cov_count[GS_COV_SLOTS];
+// The hits of the current input, one counter per slot. The counter has
+// 64 bits. A 32 bit counter wraps after 4294967296 hits of one edge, and
+// the hottest edge of a long loop would then fall into the lowest class.
+static uint64_t gs_cov_count[GS_COV_SLOTS];
 
 // The highest class of the run, one byte per slot.
 static uint8_t gs_cov_virgin[GS_COV_SLOTS];
@@ -71,9 +73,15 @@ static int gs_cov_mine = 0;
 // True when a callback came. It says that the program has the coverage.
 static int gs_cov_here = 0;
 
-// True while the callback runs. It stops the callback from calling
-// itself when this file is instrumented too.
+// True while the callback runs on this thread. It stops the callback
+// from calling itself when this file is instrumented too. Each thread
+// holds its own flag, because several threads can run the callback at
+// once.
+#if defined(__GNUC__) || defined(__clang__)
+static __thread int gs_cov_busy = 0;
+#else
 static int gs_cov_busy = 0;
+#endif
 
 // The callback must not be instrumented. The compiler of the build
 // compiles this file with the same wrapper, and an instrumented
@@ -86,9 +94,49 @@ static int gs_cov_busy = 0;
 #define GS_COV_CLEAN
 #endif
 
+// The lock of the tables. Several threads can record at once when each
+// one has attached. The hold is short: one probe of the table, or one
+// walk of the touched list. MSVC has no callback, so no second thread
+// records there and the lock calls do nothing.
+//
+// A fuzz run records on one thread, so its callback needs no lock, and
+// a lock at every edge slows a coverage build by more than two times.
+// The callback takes the lock only when `gs_cov_shared` is set. The
+// first cov_attach sets it, and cov_reset clears it. The functions that
+// run once for each input take the lock always.
+#if defined(__GNUC__) || defined(__clang__)
+#define GS_COV_LOAD(p) __atomic_load_n((p), __ATOMIC_ACQUIRE)
+#define GS_COV_STORE(p, v) __atomic_store_n((p), (v), __ATOMIC_RELEASE)
+#else
+#define GS_COV_LOAD(p) (*(p))
+#define GS_COV_STORE(p, v) (*(p) = (v))
+#endif
+
+static int gs_cov_lock = 0;
+
+// True once a thread has attached. The owner of the bracket must not
+// record when the first worker attaches, because its callback may run
+// without the lock at that moment.
+static int gs_cov_shared = 0;
+
+#if defined(__GNUC__) || defined(__clang__)
+GS_COV_CLEAN static void gs_cov_acquire(void) {
+    while (__atomic_exchange_n(&gs_cov_lock, 1, __ATOMIC_ACQUIRE)) {
+        while (__atomic_load_n(&gs_cov_lock, __ATOMIC_RELAXED)) {
+        }
+    }
+}
+GS_COV_CLEAN static void gs_cov_release(void) {
+    __atomic_store_n(&gs_cov_lock, 0, __ATOMIC_RELEASE);
+}
+#else
+#define gs_cov_acquire() ((void)0)
+#define gs_cov_release() ((void)0)
+#endif
+
 // The class of a hit count. One input that runs an edge 200 times
 // reaches the last class, and one that runs it once reaches the second.
-GS_COV_CLEAN static uint8_t gs_cov_class_of(uint32_t n) {
+GS_COV_CLEAN static uint8_t gs_cov_class_of(uint64_t n) {
     if (n == 0) return 0;
     if (n == 1) return 1;
     if (n == 2) return 2;
@@ -112,6 +160,8 @@ GS_COV_CLEAN void __sanitizer_cov_trace_pc(void) {
     gs_cov_here = 1;
     if (!gs_cov_mine || gs_cov_busy) return;
     gs_cov_busy = 1;
+    int locked = GS_COV_LOAD(&gs_cov_shared);
+    if (locked) gs_cov_acquire();
     uintptr_t addr = (uintptr_t)__builtin_return_address(0);
     uint32_t at = (uint32_t)((addr >> 4) * 2654435761u) & (GS_COV_SLOTS - 1u);
     uint32_t i = 0;
@@ -145,6 +195,7 @@ GS_COV_CLEAN void __sanitizer_cov_trace_pc(void) {
     } else {
         gs_cov_count[slot]++;
     }
+    if (locked) gs_cov_release();
     gs_cov_busy = 0;
 }
 #endif
@@ -152,6 +203,7 @@ GS_COV_CLEAN void __sanitizer_cov_trace_pc(void) {
 // Empty the table, the counters and the classes. A run calls it at its
 // start, so that the counts belong to one run.
 GS_COV_CLEAN void gs_cov_reset(void) {
+    gs_cov_acquire();
     memset(gs_cov_table, 0, sizeof gs_cov_table);
     memset(gs_cov_count, 0, sizeof gs_cov_count);
     memset(gs_cov_virgin, 0, sizeof gs_cov_virgin);
@@ -163,16 +215,41 @@ GS_COV_CLEAN void gs_cov_reset(void) {
     gs_cov_lost = 0;
     gs_cov_rises_last = 0;
     gs_cov_active = 0;
+    GS_COV_STORE(&gs_cov_shared, 0);
+    gs_cov_release();
 }
 
 // Open the bracket of one input. The input counter grows, so the
 // counts of the older inputs go stale, and the list of the touched
 // slots starts empty.
 GS_COV_CLEAN void gs_cov_begin(void) {
+    gs_cov_acquire();
     gs_cov_epoch++;
+    if (gs_cov_epoch == 0) {
+        // The counter wrapped after 4294967296 inputs. Every slot would
+        // look as if the empty number owned it, and a stale count would
+        // join the new input. Forget the old owners and skip the number 0.
+        memset(gs_cov_seen, 0, sizeof gs_cov_seen);
+        gs_cov_epoch = 1;
+    }
     gs_cov_ntouched = 0;
     gs_cov_active = 1;
+    gs_cov_release();
     gs_cov_mine = 1;
+}
+
+// Start the recording on the calling thread. The bracket stays as it
+// is. A worker calls it after the thread that owns the bracket opened
+// it, so the edges of every attached thread join one bracket.
+GS_COV_CLEAN void gs_cov_attach(void) {
+    GS_COV_STORE(&gs_cov_shared, 1);
+    gs_cov_mine = 1;
+}
+
+// Stop the recording on the calling thread. The edges that it recorded
+// stay in the bracket.
+GS_COV_CLEAN void gs_cov_detach(void) {
+    gs_cov_mine = 0;
 }
 
 // Close the bracket of one input. It gives the count of the edges
@@ -183,6 +260,7 @@ GS_COV_CLEAN uint64_t gs_cov_end(void) {
     // The thread stops recording first, so the loop below adds no
     // counts of its own, whatever the compiler did with the attribute.
     gs_cov_mine = 0;
+    gs_cov_acquire();
     if (gs_cov_active) {
         uint64_t rises = 0;
         for (uint32_t k = 0; k < gs_cov_ntouched; k++) {
@@ -201,17 +279,25 @@ GS_COV_CLEAN uint64_t gs_cov_end(void) {
         gs_cov_rises_last = rises;
         gs_cov_active = 0;
     }
-    return gs_cov_rises_last;
+    uint64_t last = gs_cov_rises_last;
+    gs_cov_release();
+    return last;
 }
 
 // The count of the distinct addresses since the last reset.
 GS_COV_CLEAN uint64_t gs_cov_total_edges(void) {
-    return gs_cov_total;
+    gs_cov_acquire();
+    uint64_t n = gs_cov_total;
+    gs_cov_release();
+    return n;
 }
 
 // The count of the addresses that found the table full.
 GS_COV_CLEAN uint64_t gs_cov_lost_edges(void) {
-    return gs_cov_lost;
+    gs_cov_acquire();
+    uint64_t n = gs_cov_lost;
+    gs_cov_release();
+    return n;
 }
 
 // The count of the edges whose highest class is cls, from 1 to 8. The
@@ -221,12 +307,15 @@ GS_COV_CLEAN uint64_t gs_cov_class_edges(int64_t cls) {
     if (cls < 1 || cls > 8) {
         return 0;
     }
-    return gs_cov_classes[cls];
+    gs_cov_acquire();
+    uint64_t n = gs_cov_classes[cls];
+    gs_cov_release();
+    return n;
 }
 
 // True when the program was built with the coverage flag.
 GS_COV_CLEAN uint8_t gs_cov_live(void) {
-    return (uint8_t)(gs_cov_here ? 1 : 0);
+    return (uint8_t)(GS_COV_LOAD(&gs_cov_here) ? 1 : 0);
 }
 
 // Write the path of the compiler wrapper of the package into out. The

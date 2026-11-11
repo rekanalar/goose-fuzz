@@ -14,7 +14,7 @@ finding with its message and its source line, and the run goes on.
 Add this to the root file of the program that uses it:
 
 ```goose
-import fuzz from "rekanalar/goose-fuzz@v1.2.0";
+import fuzz from "rekanalar/goose-fuzz@v1.3.0";
 ```
 
 The child mode needs one more package in the same root file:
@@ -33,7 +33,7 @@ hands it to the package. Call `fuzz::run`.
 
 ```goose
 import std;
-import fuzz from "rekanalar/goose-fuzz@v1.2.0";
+import fuzz from "rekanalar/goose-fuzz@v1.3.0";
 
 fn parse(d: const u8[:]) { /* may abort */ }
 
@@ -98,6 +98,14 @@ A `return` from `main` does not set the exit code of a built program. Call
 | `fuzz::read_string(r, max_len)` | Up to `max_len` bytes. |
 | `fuzz::read_i64_list(r, max_items)` | One count byte, then 8 bytes per item. |
 | `fuzz::cov_live()` | True when the program was built with the coverage compiler. |
+| `fuzz::cov_reset()` | Empty the tables of the coverage and turn the lock off. |
+| `fuzz::cov_begin()` | Open the bracket and start recording on the calling thread. |
+| `fuzz::cov_attach()` | Start recording on the calling thread. The bracket stays as it is. A worker calls it. |
+| `fuzz::cov_detach()` | Stop recording on the calling thread. Its edges stay in the bracket. |
+| `fuzz::cov_end()` | Close the bracket. Gives the count of edges whose class rose. |
+| `fuzz::cov_total()` | The distinct edges since the last reset. |
+| `fuzz::cov_lost()` | The addresses that found the table full. |
+| `fuzz::cov_class_edges(c)` | The edges whose best class is `c`, from 1 to 8. |
 | `fuzz::coverage_path(out)` | Write the path of the `cov-cc` script of the installed package into `out`. False when the path has an unexpected form. |
 | `fuzz::cores()` | One worker for each core, probed from the system. |
 | `fuzz::derive_seed(seed, batch, worker)` | The seed of one batch of one worker. |
@@ -283,8 +291,10 @@ input. A run reads the files of that directory as seeds at its start. The
 corpus holds at most 4096 files. The report counts the inputs that the
 cap turned away in `corpus_dropped`.
 
-The flag makes the target run about six times slower. The measure is a
-tight loop on gcc 15.2 on Linux. Build the plain program for a run that
+The flag makes a tight loop run about four times slower. The measure is
+a nested loop of 9 million steps, built with gcc 15.2 on Linux. It ran in
+0.15 s plain and in 0.59 s with the flag. The cost depends on the
+code. Measure your own target, and build the plain program for a run that
 needs speed.
 
 `test/cov.goose` pins the claim. A target opens three stages, one byte
@@ -295,6 +305,67 @@ bytes can stall a run. The measure of this package used three exact
 bytes. A blind run found the abort on none of eight seeds. The guided
 run found it on seven.
 
+## Coverage of several threads
+
+A program may run its work in worker threads. A test suite that runs
+its tests in parallel is one such program. The coverage of the layer
+then needs the calls below. Without them a worker records nothing.
+
+```goose
+fuzz::cov_reset();
+fuzz::cov_begin();      // the owner opens the bracket
+fuzz::cov_detach();     // the owner only waits, so it stops recording
+// each worker, in its own thread:
+//     fuzz::cov_attach();  ...the work...  fuzz::cov_detach();
+// the owner joins every worker, then closes the bracket:
+let _ = fuzz::cov_end();
+print(fuzz::cov_total());
+```
+
+`examples/session.goose` is a whole program. The workers add their edges
+to one bracket. The result does not depend on which worker ran first.
+
+These rules keep the number right.
+
+- The owner calls `cov_detach` after `cov_begin`. It does so before the
+  first worker attaches. Its waiting loop would add counts that change
+  with the speed of the machine.
+- The owner joins the workers before it calls `cov_end`. A worker that
+  still runs adds its later hits to no class.
+- A worker never calls `cov_begin`. That call restarts the bracket and
+  spoils the counts of the others.
+- A worker calls `cov_detach` before it ends. A thread that ends stops
+  recording at once, but an explicit call keeps the code clear.
+- A thread that attaches while no bracket is open adds edges to
+  `cov_total()` and to no class.
+- Build with `goose build`. `goose run` refuses a threaded program.
+
+The first `cov_attach` turns on a lock that guards the tables.
+`cov_reset` turns it off. Go has the same choice: its `atomic` mode is
+correct in multithreaded tests and costs more. The table shows the cost.
+The program is the nested loop above. Each value is the median of seven
+runs, built with gcc 15.2 on Linux.
+
+| Build | Time |
+|---|---|
+| plain | 0.15 s |
+| coverage build, one thread, no attach | 0.59 s |
+| coverage build, one attached thread | 1.39 s |
+
+A fuzz run never attaches, so it pays no lock. An attached thread pays
+about two and a half times the cost of an unattached one.
+
+What stays open:
+
+- **No percentage.** A percentage needs the count of all edges. The flag
+  `trace-pc` gives the edges that ran and no count of the rest. A reference
+  such as `go test -cover` gives a percentage. This package cannot yet.
+- **No source line.** The generated C has no `#line` directive, so an
+  edge names no Goose line. Only the compiler can close this.
+- **No export.** The package gives counts, not an `lcov` file.
+- **One table of 65536 slots.** An edge that finds none free adds to
+  `cov_lost()`. The generated C of the standard library counts too.
+
 ## Hit-count classes and mutations
 
 The coverage sorts the count of an edge into eight classes. They are
@@ -302,12 +373,13 @@ The coverage sorts the count of an edge into eight classes. They are
 an edge rises above the class of every earlier input. A loop that runs
 more often is then new.
 
-Only the thread of the target records edges. The wait loop of the main
-thread would otherwise add counts that change with the speed of the
-machine.
+In a fuzz run, only the thread of the target records edges. The wait
+loop of the main thread would otherwise add counts that change with the
+speed of the machine. A worker that attached records too.
 
 `rep.class_edges[c]` holds the edges whose best class is `c`. Index 0
-holds the edges that no input of the run reached. AFL++ uses a finer
+holds the edges that the table counted and that no closed input put in
+a class. It stays 0 in a normal run. AFL++ uses a finer
 table of powers of two. This package uses the eight classes of
 libFuzzer.
 
@@ -394,6 +466,15 @@ into a directory. These protections go beyond the reference libraries.
   starts no more children than that.
 - The corpus holds at most 4096 files. A target that keeps reaching new
   code cannot fill the disk of the caller.
+- The tables of the coverage are static and hold 65536 slots, about 1.3
+  MiB. A target that reaches more code cannot grow them. The lost edges
+  show in `cov_lost()`.
+- No Goose code runs while the lock of the tables is held. A worker that
+  aborts cannot leave the lock closed, and a target cannot hold it.
+- The hit counter of an edge has 64 bits, and the input counter restarts
+  at 1 after it wraps. A loop can run more than 4294967295 times in one
+  input. It still reaches the highest hit class. A stale count never joins
+  a later input. The C test `test/overflow.c` pins both cases.
 - No input is longer than `max_len`, and the dictionary holds at most 4096
   bytes. A seed file or a dictionary from an untrusted source cannot make
   the package hold a long text.
@@ -411,6 +492,9 @@ These risks stay.
 - The probe reruns an input that the child saved. The parent writes it to
   a file in its private directory and deletes the file after the probe. An
   input that holds a secret sits on disk for that time.
+- The lock is a spinlock. A thread that waits for it uses a core. The
+  hold is one probe of the table, so a wait stays short. A program with
+  many attached threads on few cores loses time.
 - The dictionary file is read as text. A bad line is refused with the line
   number, and no line of it runs as code.
 
@@ -488,6 +572,9 @@ parent stops a hung child at its limit.
 - The watchdog and the restart patterns.
 - The child mode on Windows. The CI runs the suite there, including the
   child cases, but no machine of this project runs Windows.
+- The cost of an attached thread on macOS. The measure above ran on Linux
+  only. No machine of this project runs macOS.
+- A program with more than eight attached threads. The tests use eight.
 - The rate of the child mode on macOS and Windows. The Linux rate is
   10000 inputs a second on a trivial target.
 

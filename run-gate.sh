@@ -7,7 +7,7 @@
 # each example. A worker is a thread, so every program builds with
 # "goose build" and then runs as a file. "goose run" cannot run threads.
 #
-# The gate also builds the coverage test twice. The plain build must print
+# The gate also builds the coverage test and the thread test twice. The plain build must print
 # the word "off". The build with the cov-cc wrapper must print "live". The
 # coverage step is skipped on Windows, because MSVC has no coverage flag.
 set -uo pipefail
@@ -59,6 +59,11 @@ step "build test/cov.goose plain" "$goose" build --debug test/cov.goose -o "$wor
 step "run test/cov.goose plain" bash -c \
     "cd '$here' && '$work/cov-off' > '$work/cov-off-out' && grep -qx off '$work/cov-off-out'"
 
+# The thread test of the coverage layer, in the plain build.
+step "build test/threads.goose plain" "$goose" build --debug test/threads.goose -o "$work/threads-off"
+step "run test/threads.goose plain" bash -c \
+    "cd '$here' && '$work/threads-off' > '$work/threads-off-out' && grep -qx off '$work/threads-off-out'"
+
 # The coverage build. MSVC has no coverage flag, so Windows skips this step.
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
@@ -69,6 +74,16 @@ case "$(uname -s)" in
             "$goose" build --debug test/cov.goose -o "$work/cov-live"
         step "run test/cov.goose with cov-cc" bash -c \
             "cd '$here' && '$work/cov-live' > '$work/cov-out' && grep -qx live '$work/cov-out'"
+        step "build test/threads.goose with cov-cc" env GOOSE_CC="$here/cov-cc" \
+            "$goose" build --debug test/threads.goose -o "$work/threads-live"
+        step "run test/threads.goose with cov-cc" bash -c \
+            "cd '$here' && '$work/threads-live' > '$work/threads-out' && grep -qx live '$work/threads-out'"
+        step "build test/overflow.c" cc -I "$here/test/stub" -o "$work/overflow" "$here/test/overflow.c"
+        step "run test/overflow.c" bash -c "'$work/overflow' | grep -qx 'overflow test passed'"
+        step "build examples/session.goose with cov-cc" env GOOSE_CC="$here/cov-cc" \
+            "$goose" build --debug examples/session.goose -o "$work/session-live"
+        step "run examples/session.goose with cov-cc" bash -c \
+            "cd '$here' && '$work/session-live' > '$work/session-out' && grep -qx live '$work/session-out'"
         ;;
 esac
 echo "gate passed"
