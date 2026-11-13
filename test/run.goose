@@ -8,6 +8,13 @@ import os;
 import process from "rekanalar/goose-process@v1.0.0";
 import fuzz from "..";
 import targets;
+import work_dirs;
+import seed_pool;
+import child_tests;
+import dict_tests;
+import reader_tests;
+import typed_tests;
+import parallel_tests;
 
 fn check_hash(data: const u8[:], want: const u8[:]) {
     var out: u8[>..] = [];
@@ -92,22 +99,11 @@ fn test_exec() {
     }
 }
 
-fn seeds16(pool: u8[>..]&, seeds: fuzz::Seed[>..]&) {
-    for i in 0..16 {
-        pool.push(i as u8);
-    }
-    var s = fuzz::Seed { };
-    s.off = 0;
-    s.len = 16;
-    s.energy = 5;
-    s.hits = 0;
-    seeds.push(s);
-}
 
 fn test_mutate() {
     var pool: u8[>..] = [];
     var seeds: fuzz::Seed[>..] = [];
-    seeds16(pool, seeds);
+    seed_pool::seeds16(pool, seeds);
     var r = rng { 1 };
     var seen: i64[20] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     var out: u8[>..] = [];
@@ -161,7 +157,7 @@ const MUTATE_TABLE = "";
 fn test_mutate_table() {
     var pool: u8[>..] = [];
     var seeds: fuzz::Seed[>..] = [];
-    seeds16(pool, seeds);
+    seed_pool::seeds16(pool, seeds);
     var r = rng { 1 };
     var out: u8[>..] = [];
     var all: u8[>..] = [];
@@ -177,18 +173,9 @@ fn test_mutate_table() {
     assert(all == "000102030405060008090a0b0c0d0e0f/000102030405060708800a0b0c0d0e0f/00060708090a0b0c0d0e010203040506/000102030405060708090a0b0c0d0e0f/000102030405060708090b0c0d0e0f/000102030405060708090af40c0d0e0f/0a0b0c0d0e0f00010203040506070809/000102030405060708090a0b0c0d0e06/");
 }
 
-// A scratch directory under TMPDIR for one test.
-fn scratch(name: const u8[:], out: u8[>..]&) {
-    env("TMPDIR", out);
-    assert(out.len > 0);
-    out.append("/");
-    out.append(name);
-    make_dir(out);
-}
-
 fn test_corpus() {
     var dir: u8[>..] = [];
-    scratch("fz-seeds", dir);
+    work_dirs::scratch("fz-seeds", dir);
     var pa: u8[>..] = [];
     pa.append(dir);
     pa.append("/a");
@@ -265,7 +252,7 @@ fn test_run() {
         d.append(root);
         d.append("/");
         d.append(n);
-        clean_dir(d);
+        work_dirs::clean_dir(d);
     }
     delete_dir(root);
     // report text
@@ -274,29 +261,6 @@ fn test_run() {
     assert(find(txt, "test/targets.goose:") >= 0);
 }
 
-// Delete every file of dir, then dir.
-fn clean_dir(dir: const u8[:]) {
-    var names: u8[>..] = [];
-    if !list_dir(dir, names) {
-        return;
-    }
-    var pos: i64 = 0;
-    while pos < names.len {
-        var stop = find(names[pos..names.len], "\n");
-        if stop < 0 {
-            stop = names.len - pos;
-        }
-        if stop > 0 {
-            var p: u8[>..] = [];
-            p.append(dir);
-            p.append("/");
-            p.append(names[pos..pos + stop]);
-            delete_file(p);
-        }
-        pos += stop + 1;
-    }
-    delete_dir(dir);
-}
 
 fn test_crashers() {
     var root: u8[>..] = [];
@@ -305,7 +269,7 @@ fn test_crashers() {
     var sub: u8[>..] = [];
     sub.append(root);
     sub.append("/assert");
-    clean_dir(sub);
+    work_dirs::clean_dir(sub);
     delete_dir(root);
     var cfg = fuzz::config();
     cfg.seed = 1;
@@ -337,7 +301,7 @@ fn test_crashers() {
     assert(rr2.runs == 1 && fuzz::finding_count(rr2) == 0);
     var rr3 = fuzz::Report { };
     assert(fuzz::replay("nothing", root, rr3, targets::assert_target) == 0);
-    clean_dir(sub);
+    work_dirs::clean_dir(sub);
     delete_dir(root);
     // an unwritable root keeps the finding: a directory cannot sit under a file
     var blocker: u8[>..] = [];
@@ -393,7 +357,7 @@ fn test_law() {
     var d: u8[>..] = [];
     d.append(root);
     d.append("/law");
-    clean_dir(d);
+    work_dirs::clean_dir(d);
     delete_dir(root);
 }
 
@@ -419,7 +383,7 @@ fn test_kinds() {
         d.append(root);
         d.append("/");
         d.append(n);
-        clean_dir(d);
+        work_dirs::clean_dir(d);
     }
     delete_dir(root);
 }
@@ -451,7 +415,7 @@ fn test_limits() {
     assert(r3.runs == 5);
     // runs 0 runs the seeds once: two seed files, two runs
     var dir: u8[>..] = [];
-    scratch("fz-limit-seeds", dir);
+    work_dirs::scratch("fz-limit-seeds", dir);
     var pa: u8[>..] = [];
     pa.append(dir);
     pa.append("/a");
@@ -466,7 +430,7 @@ fn test_limits() {
     var r4 = fuzz::Report { };
     fuzz::run("ok", cfg, r4, targets::ok_target);
     assert(r4.runs == 2);
-    clean_dir(dir);
+    work_dirs::clean_dir(dir);
 }
 
 // The coverage fields hold in a plain build and in a coverage build. A
@@ -512,7 +476,7 @@ fn test_coverage_fields() {
     var sub: u8[>..] = [];
     sub.append(croot);
     sub.append("/ok-cov");
-    clean_dir(sub);
+    work_dirs::clean_dir(sub);
     delete_dir(croot);
     delete_dir(root);
 }
@@ -556,19 +520,19 @@ fn main() {
     test_law();
     test_kinds();
     test_limits();
-    test_dict();
-    test_dict_run();
-    test_dict_child();
-    test_reader();
+    dict_tests::test_dict();
+    dict_tests::test_dict_run();
+    dict_tests::test_dict_child();
+    reader_tests::test_reader();
     test_coverage_fields();
-    test_typed();
-    test_parallel();
-    test_speedup();
+    typed_tests::test_typed();
+    parallel_tests::test_parallel();
+    parallel_tests::test_speedup();
     test_pool();
     test_score();
     test_run_with();
-    test_probe();
-    test_child();
+    child_tests::test_probe();
+    child_tests::test_child();
     print("ok hash, site, report, exec, mutate, child, dict, reader, typed, parallel");
     return 0;
 }
@@ -579,7 +543,7 @@ fn test_pool() {
     var root: u8[>..] = [];
     env("TMPDIR", root);
     root.append("/fz-pool-root");
-    clean_dir(root);
+    work_dirs::clean_dir(root);
     make_dir(root);
     var dir: u8[>..] = [];
     dir.append(root);
@@ -615,7 +579,7 @@ fn test_pool() {
     assert(fuzz::run("ok", cfg2, rep2, targets::ok_target) == 0);
     assert(rep2.runs == 100);
 
-    clean_dir(root);
+    work_dirs::clean_dir(root);
     delete_dir(root);
 }
 
@@ -625,7 +589,7 @@ fn test_score() {
     var root: u8[>..] = [];
     env("TMPDIR", root);
     root.append("/fz-score-root");
-    clean_dir(root);
+    work_dirs::clean_dir(root);
     make_dir(root);
     var cfg = fuzz::config();
     cfg.crash_root.append(root);
@@ -648,7 +612,7 @@ fn test_score() {
     assert(fuzz::run("ok", cfg, rep3, targets::score_target) == 0);
     assert(rep3.best_score == 0.0 && fuzz::best_input(rep3).len == 0);
     assert(fuzz::poll_score() == 0.0);
-    clean_dir(root);
+    work_dirs::clean_dir(root);
     delete_dir(root);
 }
 
@@ -681,7 +645,7 @@ fn test_run_with() {
     var root: u8[>..] = [];
     env("TMPDIR", root);
     root.append("/fz-with-root");
-    clean_dir(root);
+    work_dirs::clean_dir(root);
     var cfg = fuzz::config();
     cfg.crash_root.append(root);
     cfg.seed = 11;
@@ -718,609 +682,6 @@ fn test_run_with() {
     var rep3 = fuzz::Report { };
     assert(fuzz::run_with("len", cfg3, rep3, targets::len_target, long_mutator) == 0);
 
-    clean_dir(root);
+    work_dirs::clean_dir(root);
     delete_dir(root);
-}
-
-// The probe of the parent. A slow input ends the probe, and a hang
-// stops the probe again.
-fn test_probe() {
-    let prog = args()[0];
-    var root: u8[>..] = [];
-    env("TMPDIR", root);
-    root.append("/fz-probe-root");
-    clean_dir(root);
-    var cfg = fuzz::config();
-    cfg.crash_root.append(root);
-    cfg.child.append(prog);
-    cfg.seed = 8;
-    cfg.runs = 100;
-    var rep = fuzz::Report { };
-    assert(fuzz::run_isolated("slow12-child", cfg, rep) == 1);
-    assert(fuzz::finding_site(rep, 0) == "child:slow");
-    assert(rep.slow >= 1 && rep.slow == fuzz::finding_hits(rep, 0));
-    clean_dir(root);
-    delete_dir(root);
-}
-
-// The child mode: the exit case, the hang case, the clean batch, the
-// rate, and the hard errors.
-fn test_child() {
-    let prog = args()[0];
-    var root: u8[>..] = [];
-    env("TMPDIR", root);
-    root.append("/fz-child-root");
-    clean_dir(root);
-
-    // One seed file with the exit mark. The first input of the first
-    // batch calls exit(3) in the child.
-    var sdir: u8[>..] = [];
-    sdir.append(root);
-    sdir.append("/seeds");
-    make_dir(root);
-    make_dir(sdir);
-    var sp: u8[>..] = [];
-    sp.append(sdir);
-    sp.append("/m");
-    var mark: u8[>..] = [];
-    mark.push(61);
-    assert(write_file(sp, mark));
-
-    var cfg = fuzz::config();
-    cfg.child.append(prog);
-    cfg.seed = 1;
-    cfg.runs = 100;
-    cfg.seed_dir.append(sdir);
-    var croot: u8[>..] = [];
-    croot.append(root);
-    croot.append("/crash");
-    cfg.crash_root.append(croot);
-    var rep = fuzz::Report { };
-    assert(fuzz::run_isolated("exit-child", cfg, rep) == 1);
-    assert(rep.runs == 100);
-    assert(rep.seed == 1);
-    assert(fuzz::finding_site(rep, 0) == "child:exit 3");
-    assert(find(fuzz::finding_message(rep, 0), "code 3") >= 0);
-    assert(rep.findings[0].saved);
-    var names: u8[>..] = [];
-    var cdir: u8[>..] = [];
-    cdir.append(croot);
-    cdir.append("/exit-child");
-    assert(list_dir(cdir, names));
-    assert(names.len > 0);
-
-    // The hang case. The child sleeps 30 seconds, the parent stops it at
-    // the limit. The probe of two seconds stops again, so the finding
-    // keeps the site of the stop.
-    var mark2: u8[>..] = [];
-    mark2.push(62);
-    assert(write_file(sp, mark2));
-    cfg.probe_ms = 2000;
-    var rep2 = fuzz::Report { };
-    assert(fuzz::run_isolated("hang-child", cfg, rep2) == 1);
-    assert(rep2.runs == 100);
-    assert(fuzz::finding_site(rep2, 0) == "child:stopped");
-    assert(rep2.findings[0].saved);
-
-    // The clean batch and the rate. No seeds, no mark, 2000 inputs.
-    var clean = fuzz::config();
-    clean.child.append(prog);
-    clean.seed = 1;
-    clean.runs = 2000;
-    var rep3 = fuzz::Report { };
-    let t0 = clock_ns();
-    assert(fuzz::run_isolated("ok-child", clean, rep3) == 0);
-    let ms = (clock_ns() - t0) / 1000000;
-    assert(rep3.runs == 2000);
-    assert(ms > 0);
-    let rate = 2000000 / ms;
-    print("child rate: ", rate, " a second");
-    assert(rate >= 200);
-
-    // An empty child name is refused.
-    var none = fuzz::config();
-    none.seed = 1;
-    none.runs = 10;
-    var rep4 = fuzz::Report { };
-    assert(fuzz::run_isolated("ok-child", none, rep4) == -1);
-    assert(rep4.runs == 0);
-
-    // A child that does not exist is a hard error.
-    var bad = fuzz::config();
-    bad.child.append("no-such-child-program-xyz");
-    bad.seed = 1;
-    bad.runs = 10;
-    var rep5 = fuzz::Report { };
-    assert(fuzz::run_isolated("ok-child", bad, rep5) == -1);
-
-    clean_dir(root);
-    delete_dir(root);
-}
-
-
-// The dictionary: the parser, the loaders, and the reproducibility.
-fn test_dict() {
-    var root: u8[>..] = [];
-    env("TMPDIR", root);
-    root.append("/fz-dict");
-    make_dir(root);
-    var path: u8[>..] = [];
-    path.append(root);
-    path.append("/words.dict");
-    var text: u8[>..] = [];
-    text.append("# the words\n");
-    text.append("\n");
-    text.append("alpha=\"GOOSE\"\n");
-    text.append("beta=\"A\\\\z\"\n");
-    text.append("gamma=\"q\\\"i\"\n");
-    text.append("delta=\"\\x00\\xff\"\n");
-    assert(write_file(path, text));
-    var cfg = fuzz::config();
-    var err: u8[>..] = [];
-    assert(fuzz::dict_load(cfg, path, err));
-    assert(cfg.dict.len > 0);
-    // the parsed tokens
-    var dpool: u8[>..] = [];
-    var dends: i64[>..] = [];
-    assert(fuzz::dict_parse(cfg.dict, dpool, dends, err) == 4);
-    assert(dends.len == 4);
-    assert(fuzz::dict_at(dpool, dends, 0) == "GOOSE");
-    assert(fuzz::dict_at(dpool, dends, 1) == "A\\z");
-    assert(fuzz::dict_at(dpool, dends, 2) == "q\"i");
-    let tok3 = fuzz::dict_at(dpool, dends, 3);
-    assert(tok3.len == 2 && tok3[0] == 0 && tok3[1] == 255);
-    // a bad line fails the load and names the line
-    var bad: u8[>..] = [];
-    bad.append("alpha=\"ok\"\n");
-    bad.append("\n");
-    bad.append("broken\n");
-    var bad_path: u8[>..] = [];
-    bad_path.append(root);
-    bad_path.append("/bad.dict");
-    assert(write_file(bad_path, bad));
-    var cfg2 = fuzz::config();
-    err.clear();
-    assert(!fuzz::dict_load(cfg2, bad_path, err));
-    assert(find(err, "line 3") >= 0);
-    // an unterminated quote names its line
-    bad.clear();
-    bad.append("x=\"open\n");
-    assert(write_file(bad_path, bad));
-    err.clear();
-    assert(!fuzz::dict_load(cfg2, bad_path, err));
-    assert(find(err, "line 1") >= 0);
-    // a bad escape names its line
-    bad.clear();
-    bad.append("x=\"\\q\"\n");
-    assert(write_file(bad_path, bad));
-    err.clear();
-    assert(!fuzz::dict_load(cfg2, bad_path, err));
-    assert(find(err, "line 1") >= 0);
-    // dict_add appends an escaped line and refuses a full buffer
-    var cfg3 = fuzz::config();
-    assert(fuzz::dict_add(cfg3, "GO\"OOSE"));
-    assert(find(cfg3.dict, "\"GO\\\"OOSE\"") >= 0);
-    assert(fuzz::dict_add(cfg3, "\x01"));
-    assert(find(cfg3.dict, "\\x01") >= 0);
-    var big: u8[>..] = [];
-    big.resize(5000, 65);
-    var cfg4 = fuzz::config();
-    assert(!fuzz::dict_add(cfg4, big));
-    // reproducibility with a dictionary: the same seed makes the same inputs
-    var pool: u8[>..] = [];
-    var seeds: fuzz::Seed[>..] = [];
-    seeds16(pool, seeds);
-    var dpool2: u8[>..] = [];
-    var dends2: i64[>..] = [];
-    var derr2: u8[>..] = [];
-    assert(fuzz::dict_parse(cfg3.dict, dpool2, dends2, derr2) == 2);
-    var a: u8[>..] = [];
-    var b: u8[>..] = [];
-    var out: u8[>..] = [];
-    var ra = rng { 7 };
-    var rb = rng { 7 };
-    var src: i64 = -1;
-    for i in 0..500 {
-        out.clear();
-        fuzz::mutate_next_dict(ra, pool, seeds, 16, 0, dpool2, dends2, 25, out, src);
-        a.append(out);
-        out.clear();
-        fuzz::mutate_next_dict(rb, pool, seeds, 16, 0, dpool2, dends2, 25, out, src);
-        b.append(out);
-    }
-    assert(a == b);
-    // with an empty dictionary the inputs equal those of mutate_next
-    var none: u8[>..] = [];
-    var noends: i64[>..] = [];
-    var a2: u8[>..] = [];
-    var b2: u8[>..] = [];
-    var ra2 = rng { 3 };
-    var rb2 = rng { 3 };
-    for i in 0..1000 {
-        out.clear();
-        fuzz::mutate_next_dict(ra2, pool, seeds, 16, 0, none, noends, 25, out, src);
-        a2.append(out);
-        out.clear();
-        fuzz::mutate_next(rb2, pool, seeds, 16, 0, out, src);
-        b2.append(out);
-    }
-    assert(a2 == b2);
-    // token inputs hold the token
-    var hits: i64 = 0;
-    var rc = rng { 11 };
-    for i in 0..2000 {
-        out.clear();
-        let k = fuzz::mutate_next_dict(rc, pool, seeds, 16, 0, dpool2, dends2, 100, out, src);
-        assert(out.len <= 16);
-        if k >= 4 {
-            hits += 1;
-        }
-    }
-    assert(hits > 400);
-    // a token longer than max_len is cut, and no input passes max_len
-    var long_dpool: u8[>..] = [];
-    var long_dends: i64[>..] = [];
-    var long_tok: u8[>..] = [];
-    long_tok.resize(64, 65);
-    long_dpool.append(long_tok);
-    long_dends.push(long_dpool.len);
-    var rl = rng { 5 };
-    for i in 0..500 {
-        out.clear();
-        let k = fuzz::mutate_next_dict(rl, pool, seeds, 16, 0, long_dpool, long_dends, 100, out, src);
-        assert(out.len <= 16);
-        if k == 5 {
-            // an overwrite always shows a token byte; the seeds hold only 0 to 15
-            assert(find(out, "A") >= 0);
-        }
-    }
-    // a duplicate token stays twice
-    var dup_text: u8[>..] = [];
-    dup_text.append("a=\"AB\"\n");
-    dup_text.append("b=\"AB\"\n");
-    var dup_pool: u8[>..] = [];
-    var dup_ends: i64[>..] = [];
-    var dup_err: u8[>..] = [];
-    assert(fuzz::dict_parse(dup_text, dup_pool, dup_ends, dup_err) == 2);
-    // a NUL token survives a mutation round as it is
-    var nul_text: u8[>..] = [];
-    nul_text.append("n=\"\\x00Z\"\n");
-    var nul_pool: u8[>..] = [];
-    var nul_ends: i64[>..] = [];
-    var nul_err: u8[>..] = [];
-    assert(fuzz::dict_parse(nul_text, nul_pool, nul_ends, nul_err) == 1);
-    var nul_seen = false;
-    var rn = rng { 13 };
-    for i in 0..500 {
-        out.clear();
-        fuzz::mutate_next_dict(rn, pool, seeds, 16, 0, nul_pool, nul_ends, 100, out, src);
-        if find(out, "\x00Z") >= 0 {
-            nul_seen = true;
-        }
-    }
-    assert(nul_seen);
-    delete_file(path);
-    delete_file(bad_path);
-    delete_dir(root);
-}
-
-// The token steers the mutator to the prefix abort.
-fn test_dict_run() {
-    var root: u8[>..] = [];
-    env("TMPDIR", root);
-    root.append("/fz-dict-run");
-    make_dir(root);
-    var sdir: u8[>..] = [];
-    sdir.append(root);
-    sdir.append("/seeds");
-    make_dir(sdir);
-    var names: u8[>..] = [];
-    names.append("abc");
-    names.append("\nhello\n");
-    names.append("xy\n");
-    var sp: u8[>..] = [];
-    sp.append(sdir);
-    sp.append("/m");
-    assert(write_file(sp, names));
-    var cfg = fuzz::config();
-    cfg.seed_dir.append(sdir);
-    cfg.runs = 2000;
-    var croot: u8[>..] = [];
-    croot.append(root);
-    croot.append("/crash");
-    cfg.crash_root.append(croot);
-    // with the word in the dictionary, every run finds the abort
-    var dcfg = fuzz::config();
-    dcfg.seed_dir.append(sdir);
-    dcfg.runs = 2000;
-    dcfg.crash_root.append(croot);
-    assert(fuzz::dict_add(dcfg, "GOOSE"));
-    var found: i64 = 0;
-    for s in 1..21 {
-        dcfg.seed = s as u64;
-        var rep = fuzz::Report { };
-        assert(fuzz::run("goose", dcfg, rep, targets::goose_target) == 1);
-        found += 1;
-    }
-    assert(found == 20);
-    // without the dictionary, fewer than 10 of the 20 find it
-    var plain: i64 = 0;
-    for s in 1..21 {
-        cfg.seed = s as u64;
-        var rep = fuzz::Report { };
-        if fuzz::run("goose", cfg, rep, targets::goose_target) == 1 {
-            plain += 1;
-        }
-    }
-    assert(plain < 10);
-    var d: u8[>..] = [];
-    d.append(croot);
-    d.append("/goose");
-    clean_dir(d);
-    clean_dir(sdir);
-    delete_dir(root);
-}
-
-// The dictionary reaches the child as the eighth and ninth argument.
-// A parent that passes seven arguments still runs, as the unchanged
-// child tests of v0.2.0 prove.
-fn test_dict_child() {
-    let prog = args()[0];
-    var root: u8[>..] = [];
-    env("TMPDIR", root);
-    root.append("/fz-dict-child");
-    make_dir(root);
-    var cfg = fuzz::config();
-    cfg.child.append(prog);
-    cfg.seed = 5;
-    cfg.runs = 500;
-    cfg.workers = 1;
-    var croot: u8[>..] = [];
-    croot.append(root);
-    croot.append("/crash");
-    cfg.crash_root.append(croot);
-    assert(fuzz::dict_add(cfg, "GOOSE"));
-    var rep = fuzz::Report { };
-    assert(fuzz::run_isolated("dict-child", cfg, rep) == 0);
-    assert(rep.runs == 500);
-    // the child contained the abort and saved the crasher itself
-    var cdir: u8[>..] = [];
-    cdir.append(croot);
-    cdir.append("/dict-child");
-    var names: u8[>..] = [];
-    assert(list_dir(cdir, names));
-    assert(names.len > 0);
-    clean_dir(cdir);
-    delete_dir(root);
-}
-
-// The reader: the ranges, the defaults, and the determinism.
-fn test_reader() {
-    // the defaults on an empty input
-    var r = fuzz::reader("");
-    assert(!fuzz::read_bool(r));
-    assert(fuzz::read_i64(r, -5, 5) == 0);
-    assert(fuzz::read_i64(r, 1000, 1010) == 0);
-    assert(fuzz::read_string(r, 8).len == 0);
-    assert(fuzz::read_i64_list(r, 4).len == 0);
-    // a refused range returns 0 and consumes nothing
-    var buf: u8[>..] = [];
-    buf.resize(32, 200);
-    var r2 = fuzz::reader(buf);
-    assert(fuzz::read_i64(r2, 10, 1) == 0);
-    assert(r2.pos == 0);
-    // every value stays in its range, over random inputs
-    var rng1 = rng { 9 };
-    var bytes: u8[>..] = [];
-    for i in 0..500 {
-        bytes.clear();
-        let n = rng1.rand_int(33);
-        for k in 0..n {
-            bytes.push(rng1.rand_int(256) as u8);
-        }
-        var rr = fuzz::reader(bytes);
-        if n == 0 {
-            // the defaults of an empty input: false and 0
-            assert(!fuzz::read_bool(rr));
-            assert(fuzz::read_i64(rr, 1000, 1010) == 0);
-            continue;
-        }
-        let v = fuzz::read_i64(rr, 1000, 1010);
-        assert(v >= 1000 && v <= 1010);
-        if rr.pos < rr.data.len {
-            // bytes remain, so the value maps into the range
-            let w = fuzz::read_i64(rr, -7, -3);
-            assert(w >= -7 && w <= -3);
-        }
-        fuzz::read_bool(rr);
-        fuzz::read_string(rr, 9);
-        fuzz::read_i64_list(rr, 5);
-    }
-    // the same bytes give the same values twice
-    var fixed: u8[>..] = [];
-    for i in 0..40 {
-        fixed.push(((i * 7 + 3) % 256) as u8);
-    }
-    var r3 = fuzz::reader(fixed);
-    var r4 = fuzz::reader(fixed);
-    assert(fuzz::read_i64(r3, 0, 1000000) == fuzz::read_i64(r4, 0, 1000000));
-    assert(fuzz::read_bool(r3) == fuzz::read_bool(r4));
-    assert(fuzz::read_string(r3, 5) == fuzz::read_string(r4, 5));
-    assert(fuzz::read_i64_list(r3, 3) == fuzz::read_i64_list(r4, 3));
-    // a list holds what the bytes give, up to the maximum
-    var lst: u8[>..] = [];
-    lst.push(10);
-    for i in 0..40 {
-        lst.push(i as u8);
-    }
-    var r5 = fuzz::reader(lst);
-    let xs = fuzz::read_i64_list(r5, 3);
-    assert(xs.len == 3);
-    var r6 = fuzz::reader(lst);
-    let ys = fuzz::read_i64_list(r6, 100);
-    assert(ys.len == 5);
-    // a short list gives the items that the bytes hold
-    var short: u8[>..] = [];
-    short.push(4);
-    short.push(1);
-    short.push(2);
-    var r7 = fuzz::reader(short);
-    assert(fuzz::read_i64_list(r7, 10).len == 0);
-}
-
-// The typed target finds, replays and shrinks.
-fn test_typed() {
-    var root: u8[>..] = [];
-    env("TMPDIR", root);
-    root.append("/fz-typed");
-    make_dir(root);
-    // Seed files with several bytes, so an input holds a flag byte too.
-    var sdir: u8[>..] = [];
-    sdir.append(root);
-    sdir.append("/seeds");
-    make_dir(sdir);
-    for f in 0..3 {
-        var sp: u8[>..] = [];
-        sp.append(sdir);
-        sp.append("/s");
-        format_int(sp, f, 10, 0, ' ');
-        var data: u8[>..] = [];
-        for i in 0..40 {
-            data.push(((f * 13 + i * 7 + 1) % 256) as u8);
-        }
-        assert(write_file(sp, data));
-    }
-    var cfg = fuzz::config();
-    cfg.runs = 20000;
-    cfg.seed_dir.append(sdir);
-    var croot: u8[>..] = [];
-    croot.append(root);
-    croot.append("/crash");
-    cfg.crash_root.append(croot);
-    for s in 1..11 {
-        cfg.seed = s as u64;
-        var rep = fuzz::Report { };
-        assert(fuzz::run("typed", cfg, rep, targets::typed_target) == 1);
-        let site = fuzz::finding_site(rep, 0);
-        assert(find(site, "test/targets.goose:") >= 0);
-        if s == 1 {
-            // the crasher replays at the same site
-            var rr = fuzz::Report { };
-            assert(fuzz::replay("typed", croot, rr, targets::typed_target) == 1);
-            assert(fuzz::finding_site(rr, 0) == site);
-            // the shrunk input aborts at the same site
-            var small: u8[>..] = [];
-            assert(fuzz::shrink(fuzz::finding_input(rep, 0), small, targets::typed_target));
-            assert(small.len < fuzz::finding_input(rep, 0).len);
-            var why: u8[>..] = [];
-            var got: u8[>..] = [];
-            assert(fuzz::aborts_at(small, site, why, got, targets::typed_target));
-        }
-    }
-    var d: u8[>..] = [];
-    d.append(croot);
-    d.append("/typed");
-    clean_dir(d);
-    clean_dir(sdir);
-    delete_dir(root);
-}
-
-// The parallel workers: the seeds, the limit, the merge, the failures.
-fn test_parallel() {
-    var root: u8[>..] = [];
-    env("TMPDIR", root);
-    root.append("/fz-par");
-    make_dir(root);
-    // no two batches share a seed; the same seed repeats the run
-    let s0 = fuzz::derive_seed(7, 0, 0);
-    assert(s0 == fuzz::derive_seed(7, 0, 0));
-    assert(s0 != fuzz::derive_seed(7, 1, 0));
-    assert(s0 != fuzz::derive_seed(7, 0, 1));
-    assert(s0 != fuzz::derive_seed(8, 0, 0));
-    // a count above 15 is refused before any child starts
-    let prog = args()[0];
-    var cfg = fuzz::config();
-    cfg.child.append(prog);
-    cfg.seed = 1;
-    cfg.runs = 100;
-    cfg.workers = 16;
-    var rep = fuzz::Report { };
-    assert(fuzz::run_isolated("ok-child", cfg, rep) == -1);
-    assert(rep.runs == 0);
-    cfg.workers = 100;
-    var rep2 = fuzz::Report { };
-    assert(fuzz::run_isolated("ok-child", cfg, rep2) == -1);
-    assert(rep2.runs == 0);
-    // four workers that hit one site give one finding with summed hits
-    var sdir: u8[>..] = [];
-    sdir.append(root);
-    sdir.append("/seeds");
-    make_dir(sdir);
-    var sp: u8[>..] = [];
-    sp.append(sdir);
-    sp.append("/m");
-    var mark: u8[>..] = [];
-    mark.push(61);
-    assert(write_file(sp, mark));
-    var cfg4 = fuzz::config();
-    cfg4.child.append(prog);
-    cfg4.seed = 1;
-    cfg4.runs = 100;
-    cfg4.workers = 4;
-    cfg4.seed_dir.append(sdir);
-    var croot: u8[>..] = [];
-    croot.append(root);
-    croot.append("/crash");
-    cfg4.crash_root.append(croot);
-    var rep4 = fuzz::Report { };
-    assert(fuzz::run_isolated("exit-child", cfg4, rep4) == 1);
-    assert(rep4.runs == 100);
-    assert(fuzz::finding_count(rep4) == 1);
-    assert(fuzz::finding_site(rep4, 0) == "child:exit 3");
-    assert(fuzz::finding_hits(rep4, 0) == 4);
-    // a missing child program with four workers frees them and fails
-    var bad = fuzz::config();
-    bad.child.append("no-such-child-program-xyz");
-    bad.seed = 1;
-    bad.runs = 10;
-    bad.workers = 4;
-    var rep5 = fuzz::Report { };
-    assert(fuzz::run_isolated("ok-child", bad, rep5) == -1);
-    var d: u8[>..] = [];
-    d.append(croot);
-    d.append("/exit-child");
-    clean_dir(d);
-    clean_dir(sdir);
-    delete_dir(root);
-}
-
-// Four workers finish a slow run in two thirds of the time of one
-// worker. The check needs four cores, so a smaller machine skips it.
-fn test_speedup() {
-    if fuzz::cores() < 4 {
-        print("speedup skipped: fewer than four cores");
-        return;
-    }
-    let prog = args()[0];
-    var cfg1 = fuzz::config();
-    cfg1.child.append(prog);
-    cfg1.seed = 1;
-    cfg1.runs = 1000;
-    cfg1.workers = 1;
-    var rep1 = fuzz::Report { };
-    let t1 = clock_ns();
-    assert(fuzz::run_isolated("slow-child", cfg1, rep1) == 0);
-    let ms1 = (clock_ns() - t1) / 1000000;
-    var cfg4 = fuzz::config();
-    cfg4.child.append(prog);
-    cfg4.seed = 1;
-    cfg4.runs = 1000;
-    cfg4.workers = 4;
-    var rep4 = fuzz::Report { };
-    let t4 = clock_ns();
-    assert(fuzz::run_isolated("slow-child", cfg4, rep4) == 0);
-    let ms4 = (clock_ns() - t4) / 1000000;
-    assert(rep1.runs == 1000 && rep4.runs == 1000);
-    print("speedup: one worker ", ms1, " ms, four workers ", ms4, " ms");
-    assert(ms4 * 3 <= ms1 * 2);
 }
